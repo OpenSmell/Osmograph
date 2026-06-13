@@ -1,0 +1,26 @@
+# Core GUI
+PySide6>=6.5.0
+pyqtgraph>=0.13.0
+
+# Data handling
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Serial communication
+pyserial>=3.5
+
+# Firmware flashing
+esptool>=4.0
+
+# OpenSmell SDK (in-project dependency)
+# Add the parent opensmell/ directory to PYTHONPATH
+
+# Optional: adapter training
+scikit-learn>=1.2.0
+torch>=2.0.0
+
+# File watching (optional plugin reload)
+watchdog>=3.0.0
+
+# WiFi board discovery (optional)
+zeroconf>=0.131.0

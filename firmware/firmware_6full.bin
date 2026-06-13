@@ -1,0 +1,5 @@
+# Osmograph firmware placeholder
+# Board: esp32
+# Sensors: MQ-135, MQ-3, MQ-6, MQ-7, MQ-4, MQ-8
+# Pins: [34, 35, 32, 33, 25, 26]
+# Flash this binary using esptool.py
