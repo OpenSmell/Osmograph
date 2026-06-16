@@ -9,6 +9,7 @@ from Osmograph.viz.traces import LiveTracesWidget
 from Osmograph.viz.chemprint import ChemprintBarWidget
 from Osmograph.viz.signal_quality import SignalQualityIndicator
 from Osmograph.viz.substance import SubstanceDisplay
+from Osmograph.viz.competition_grid import CompetitionGrid
 from Osmograph.ui.theme import COLORS
 
 
@@ -16,6 +17,7 @@ class DashboardWidget(QWidget):
     def __init__(self, sensor_count: int = 6, parent=None):
         super().__init__(parent)
         self._sensor_count = sensor_count
+        self._classifier = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -73,7 +75,13 @@ class DashboardWidget(QWidget):
         right_layout.addWidget(self.signal_quality)
 
         self.substance = SubstanceDisplay()
+        self.substance.setMinimumHeight(100)
         right_layout.addWidget(self.substance)
+
+        self.competition = CompetitionGrid()
+        self.competition.setMinimumHeight(150)
+        self.competition.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        right_layout.addWidget(self.competition, 1)
 
         data_info = QLabel("Per-Sensor Quality")
         data_info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; padding-top: 8px;")
@@ -90,7 +98,7 @@ class DashboardWidget(QWidget):
         right_layout.addStretch()
         content.addWidget(right_panel)
 
-        content.setSizes([750, 200])
+        content.setSizes([650, 300])
         layout.addWidget(content)
 
         self._hint_label = QLabel(
@@ -113,14 +121,45 @@ class DashboardWidget(QWidget):
         self.traces.start_timers()
         self.signal_quality.start_timers()
 
+    def set_classifier(self, classifier) -> None:
+        self._classifier = classifier
+        if classifier and classifier.is_loaded and classifier.classes:
+            self.competition.set_classes(classifier.classes)
+
     def add_sample(self, sample: np.ndarray) -> None:
         self.traces.add_sample(sample)
         self._hint_label.setVisible(False)
+        if self._classifier and self._classifier.is_loaded:
+            result = self._classifier.add_sample(sample)
+            if result is not None:
+                label, confidence = result
+                self._update_competition_grid()
+                if not self._classifier.is_unknown:
+                    self.update_prediction(label, confidence)
+                    self.substance.set_flash(label != self.substance._last_substance)
+                    self.substance._last_substance = label
+                else:
+                    nearest = label if label != "unknown" else ""
+                    display = f"Unknown — nearest: {nearest}" if nearest else "Unknown"
+                    self.update_prediction(display, confidence, "Low confidence — out of distribution")
+                    self.substance._last_substance = "unknown"
+
+                if self._classifier.is_locked:
+                    self.substance.set_locked(True, self._classifier.locked_class)
+                else:
+                    self.substance.set_locked(False)
+
+    def _update_competition_grid(self) -> None:
+        if not self._classifier or not self._classifier.is_loaded:
+            return
+        probs = self._classifier.current_probabilities
+        classes = self._classifier.classes
+        if probs and classes and len(probs) == len(classes):
+            top_idx = int(np.argmax(probs))
+            self.competition.update_probabilities(probs, top_idx)
 
     def update_prediction(self, substance: str, confidence: float, warning: str = "") -> None:
         self.substance.update_prediction(substance, confidence, warning)
-        if substance and substance != "---":
-            self._substance_label.setText(f"Substance: {substance}")
 
     def update_chemprint(self, chemprint: np.ndarray) -> None:
         self.chemprint.update_chemprint(chemprint)
@@ -177,6 +216,7 @@ class DashboardWidget(QWidget):
         self.substance.clear()
         self.signal_quality.reset_warmup()
         self.chemprint.clear()
+        self.competition.reset()
         self._sample_count_label.setText("Samples: 0")
         self._data_quality.setText("")
         for lbl in self._sensor_quality_labels:

@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import pickle
 import logging
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,9 @@ from Osmograph.sensor import SensorProfiles, PinMapper, PresetManager
 from Osmograph.data import SerialReader, WifiReader, DataValidator, CSVRecorder, SessionManager, SessionRecord
 from Osmograph.viz import DashboardWidget
 from Osmograph.viz.signal_quality import SignalLevel
+from Osmograph.viz.realtime_classifier import RealtimeClassifier
+from Osmograph.viz.train_tab import TrainTab
+from Osmograph.substance_library import SubstanceLibrary
 from Osmograph.burnin import BurnInTracker
 from Osmograph.wizard import AdapterWizard
 from Osmograph.plugins import PluginLoader
@@ -55,6 +59,7 @@ class OsmographMainWindow(QMainWindow):
         self._burnin = BurnInTracker(self)
         self._adapter_wizard = AdapterWizard()
         self._plugin_loader = PluginLoader()
+        self._classifier = RealtimeClassifier()
         self._flasher = FlashingService()
         self._firmware_dir = Path(__file__).resolve().parent / "firmware"
         self._active_preset = ""
@@ -92,6 +97,7 @@ class OsmographMainWindow(QMainWindow):
         self._tabs.setDocumentMode(True)
 
         self.dashboard = DashboardWidget()
+        self.dashboard.set_classifier(self._classifier)
         self._tabs.addTab(self.dashboard, "Dashboard")
         self._tabs.setTabToolTip(0, "Live sensor traces, chemoprint, predictions")
 
@@ -99,21 +105,26 @@ class OsmographMainWindow(QMainWindow):
         self._tabs.addTab(self._session_tab, "Sessions")
         self._tabs.setTabToolTip(1, "Browse, process, and manage recordings")
 
+        self._train_tab = TrainTab(n_sensors=self._classifier.n_sensors)
+        self._train_tab.training_complete.connect(self._on_train_complete)
+        self._tabs.addTab(self._train_tab, "Train")
+        self._tabs.setTabToolTip(2, "Train a real-time substance classifier from your recordings")
+
         self._adapter_tab = self._build_adapter_tab()
         self._tabs.addTab(self._adapter_tab, "Adapter")
-        self._tabs.setTabToolTip(2, "Train a lightweight classifier on your samples")
+        self._tabs.setTabToolTip(3, "Train a lightweight adapter on your samples")
 
         self._plugin_tab = self._build_plugin_tab()
         self._tabs.addTab(self._plugin_tab, "Plugins")
-        self._tabs.setTabToolTip(3, "Manage OpenSmell plugins and model heads")
+        self._tabs.setTabToolTip(4, "Manage OpenSmell plugins and model heads")
 
         self._settings_tab = self._build_settings_tab()
         self._tabs.addTab(self._settings_tab, "Settings")
-        self._tabs.setTabToolTip(4, "Serial connection and data directory settings")
+        self._tabs.setTabToolTip(5, "Serial connection and data directory settings")
 
         self._burnin_tab = self._build_burnin_tab()
         self._tabs.addTab(self._burnin_tab, "Burn-In")
-        self._tabs.setTabToolTip(5, "Track sensor burn-in time (24h recommended for new MQ sensors)")
+        self._tabs.setTabToolTip(6, "Track sensor burn-in time (24h recommended for new MQ sensors)")
 
         layout.addWidget(self._tabs)
 
@@ -268,6 +279,23 @@ class OsmographMainWindow(QMainWindow):
         sep2.setFrameShape(QFrame.VLine)
         sep2.setStyleSheet(f"color: {COLORS['border']};")
         layout.addWidget(sep2)
+
+        self._classifier_combo = QComboBox()
+        self._classifier_combo.setMinimumWidth(140)
+        self._classifier_combo.setToolTip("Select a real-time classifier (.pkl)")
+        self._classifier_combo.currentIndexChanged.connect(self._on_classifier_change)
+        layout.addWidget(QLabel("Classifier:"))
+        layout.addWidget(self._classifier_combo)
+
+        self._train_clf_btn = QPushButton("Train...")
+        self._train_clf_btn.setToolTip("Train a new classifier from your recordings")
+        self._train_clf_btn.clicked.connect(self._open_training_wizard)
+        layout.addWidget(self._train_clf_btn)
+
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.VLine)
+        sep3.setStyleSheet(f"color: {COLORS['border']};")
+        layout.addWidget(sep3)
 
         self._label_input = QLineEdit()
         self._label_input.setPlaceholderText("Label (e.g. garlic)...")
@@ -510,6 +538,43 @@ class OsmographMainWindow(QMainWindow):
 
         layout.addWidget(serial_group)
 
+        clf_group = QGroupBox("Classifier")
+        cg_layout = QVBoxLayout(clf_group)
+
+        ws_layout = QHBoxLayout()
+        ws_layout.addWidget(QLabel("Window size (samples):"))
+        self._window_size_spin = QSpinBox()
+        self._window_size_spin.setRange(20, 500)
+        self._window_size_spin.setValue(self._classifier.window_size)
+        self._window_size_spin.valueChanged.connect(self._on_window_size_change)
+        ws_layout.addWidget(self._window_size_spin)
+        ws_label = QLabel("Lower = faster, higher = more stable")
+        ws_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        ws_layout.addWidget(ws_label)
+        ws_layout.addStretch()
+        cg_layout.addLayout(ws_layout)
+
+        conf_layout = QHBoxLayout()
+        conf_layout.addWidget(QLabel("Confidence threshold:"))
+        self._conf_threshold_spin = QDoubleSpinBox()
+        self._conf_threshold_spin.setRange(0.0, 1.0)
+        self._conf_threshold_spin.setSingleStep(0.05)
+        self._conf_threshold_spin.setValue(self._classifier.confidence_threshold)
+        self._conf_threshold_spin.valueChanged.connect(self._on_conf_threshold_change)
+        conf_layout.addWidget(self._conf_threshold_spin)
+        conf_label = QLabel("Below this → 'unknown'")
+        conf_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        conf_layout.addWidget(conf_label)
+        conf_layout.addStretch()
+        cg_layout.addLayout(conf_layout)
+
+        clf_info = QLabel(f"Active: {self._classifier.classifier_name}")
+        clf_info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; padding: 2px;")
+        self._clf_info_label = clf_info
+        cg_layout.addWidget(clf_info)
+
+        layout.addWidget(clf_group)
+
         data_group = QGroupBox("Data Storage")
         dg_layout = QVBoxLayout(data_group)
 
@@ -540,6 +605,8 @@ class OsmographMainWindow(QMainWindow):
         self._burnin.tick.connect(self._on_burnin_tick)
         self._burnin.completed.connect(self._on_burnin_complete)
 
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+
     def _restore_geometry(self):
         geom = self._settings.value("ui/geometry")
         if geom:
@@ -550,6 +617,9 @@ class OsmographMainWindow(QMainWindow):
 
     def _initial_discover(self):
         self._refresh_ports()
+        preset = PresetManager.get(self._active_preset)
+        if preset:
+            self._classifier.n_sensors = preset.sensor_count
         boards = BoardDetector.detect()
         if boards:
             known = [b for b in boards if b.is_known]
@@ -560,6 +630,7 @@ class OsmographMainWindow(QMainWindow):
         plugin_dir = Path.home() / ".config" / "Osmograph" / "plugins"
         self._plugin_loader = PluginLoader(plugin_dir)
         self._discover_plugins()
+        self._scan_classifiers()
         self._refresh_session_list()
 
         if self._session_manager.get_record_count() == 0:
@@ -572,6 +643,94 @@ class OsmographMainWindow(QMainWindow):
             self._port_combo.setCurrentText(last_port)
             if self._connection_mode == "Serial":
                 QTimer.singleShot(500, self._connect_device)
+
+    def _scan_classifiers(self):
+        classifiers_dir = Path(__file__).resolve().parent / "classifiers"
+        self._classifier_combo.blockSignals(True)
+        self._classifier_combo.clear()
+        self._classifier_combo.addItem("None", None)
+        if classifiers_dir.exists():
+            for pkl_path in sorted(classifiers_dir.glob("*.pkl")):
+                display = self._read_classifier_display_name(pkl_path)
+                self._classifier_combo.addItem(display, str(pkl_path))
+        self._classifier_combo.blockSignals(False)
+        last = self._settings.value("classifier/selected", "")
+        if last:
+            idx = self._classifier_combo.findData(last)
+            if idx >= 0:
+                self._classifier_combo.setCurrentIndex(idx)
+
+    def _read_classifier_display_name(self, pkl_path: Path) -> str:
+        try:
+            with open(pkl_path, "rb") as f:
+                model = pickle.load(f)
+            name = model.get("classifier_name", "")
+            classes = model.get("classes", [])
+            if name:
+                suffix = f" ({len(classes)} classes)" if classes else ""
+                return name + suffix
+        except Exception:
+            pass
+        return pkl_path.stem.replace("_", " ").title()
+
+    def _on_classifier_change(self, idx: int):
+        pkl_path = self._classifier_combo.itemData(idx)
+        if pkl_path:
+            self._classifier.load(pkl_path)
+            self._settings.setValue("classifier/selected", pkl_path)
+            if hasattr(self, '_window_size_spin'):
+                self._window_size_spin.setValue(self._classifier.window_size)
+            self._update_clf_info()
+            self.dashboard.set_classifier(self._classifier)
+            self._status.showMessage(
+                f"Loaded: {self._classifier.classifier_name} "
+                f"({len(self._classifier.classes)} classes)", 5000
+            )
+        else:
+            self._classifier.unload()
+            self._settings.setValue("classifier/selected", "")
+            self._update_clf_info()
+            self.dashboard.set_classifier(self._classifier)
+            self._status.showMessage("Classifier unloaded", 3000)
+
+    def _update_clf_info(self):
+        if hasattr(self, '_clf_info_label'):
+            clf = self._classifier
+            if clf.is_loaded:
+                text = (f"Active: {clf.classifier_name} | "
+                        f"{len(clf.classes)} classes: {', '.join(clf.classes)} | "
+                        f"Window: {clf.window_size} | "
+                        f"Threshold: {clf.confidence_threshold:.2f}")
+            else:
+                text = "Active: None"
+            self._clf_info_label.setText(text)
+
+    def _on_window_size_change(self, value: int):
+        self._classifier.window_size = value
+        self._status.showMessage(f"Window size: {value} samples (~{value//2}s at 2 Hz)", 3000)
+        self._update_clf_info()
+
+    def _on_conf_threshold_change(self, value: float):
+        self._classifier.confidence_threshold = value
+        self._status.showMessage(f"Confidence threshold: {value:.2f}", 3000)
+        self._update_clf_info()
+
+    def _open_training_wizard(self):
+        self._train_tab.set_sensor_count(self._classifier.n_sensors)
+        self._train_tab.set_recordings(self._session_manager.get_records())
+        self._tabs.setCurrentWidget(self._train_tab)
+
+    def _on_train_complete(self, model_path: str):
+        self._scan_classifiers()
+        idx = self._classifier_combo.findData(model_path)
+        if idx >= 0:
+            self._classifier_combo.setCurrentIndex(idx)
+            self.dashboard.set_classifier(self._classifier)
+            self._status.showMessage(
+                f"Classifier trained and loaded: {self._classifier.classifier_name}", 5000
+            )
+        else:
+            self._status.showMessage("Training complete! Select your classifier from the dropdown.", 5000)
 
     def _refresh_ports(self):
         from Osmograph.board.detector import BoardDetector
@@ -653,6 +812,8 @@ class OsmographMainWindow(QMainWindow):
         preset = PresetManager.get(preset_name)
         if preset:
             self.dashboard.set_sensor_count(preset.sensor_count)
+            self._classifier.n_sensors = preset.sensor_count
+            self._train_tab.set_sensor_count(preset.sensor_count)
             self._validator.reset()
 
     def _on_mode_change(self, mode: str):
@@ -775,6 +936,10 @@ class OsmographMainWindow(QMainWindow):
     def _on_bootloader(self):
         pass
 
+    def _on_tab_changed(self, index: int):
+        if self._tabs.widget(index) is self._train_tab:
+            self._train_tab.set_recordings(self._session_manager.get_records())
+
     def _on_data_received(self, sample: np.ndarray):
         self.dashboard.add_sample(sample)
         if self._recorder.is_recording:
@@ -794,6 +959,7 @@ class OsmographMainWindow(QMainWindow):
             self._recording_timer.stop()
             self._record_btn.setEnabled(True)
             self._record_btn.setText("Record")
+            self.dashboard.signal_quality.set_recording(False)
 
             record = SessionRecord(
                 substance=label,
@@ -839,6 +1005,7 @@ class OsmographMainWindow(QMainWindow):
         self._recording_bar.setVisible(False)
         self._record_btn.setEnabled(True)
         self._record_btn.setText("Record")
+        self.dashboard.signal_quality.set_recording(False)
 
     def _refresh_session_list(self):
         from PySide6.QtWidgets import QListWidgetItem
@@ -1012,7 +1179,8 @@ class OsmographMainWindow(QMainWindow):
 
     def _on_burnin_complete(self):
         self._status.showMessage("Burn-in complete! Sensors are ready.", 10000)
-        self._burnin_label.setStyleSheet(f"color: {COLORS['accent_green']}; padding: 0 8px;")
+        self._burnin_status.setText("Burn-in: COMPLETE")
+        self._burnin_status.setStyleSheet(f"color: {COLORS['accent_green']}; font-size: 24px; font-weight: bold;")
 
     def _start_burnin(self):
         hours = self._burnin_hours_spin.value()
@@ -1047,28 +1215,30 @@ class OsmographMainWindow(QMainWindow):
             output_dir = Path.home() / ".cache" / "Osmograph" / "firmware" / f"custom_{self._active_preset.replace(' ', '_')}"
             path = FirmwareCompiler.export_sketch(
                 output_dir=output_dir,
-                sensors=sensors,
                 pins=pins,
-                board="esp32",
             )
             InfoDialog("Firmware Compiled",
                 f"PlatformIO project created at:\n{path}\n\n"
                 f"Open this folder in VS Code with the PlatformIO extension, "
-                f"then build and upload to your ESP32.").exec()
+                f"build and upload to your ESP32.\n\n"
+                f"The firmware works over USB Serial AND WiFi simultaneously.\n"
+                f"WiFi network: OSMOGRAPH-XXXX (no password)").exec()
 
     def _discover_plugins(self):
         self._plugin_loader.discover()
         self._reload_plugins()
 
     def _reload_plugins(self):
+        from PySide6.QtWidgets import QTableWidgetItem
+
         plugins = self._plugin_loader.reload_all()
         self._plugin_table.setRowCount(len(plugins))
         for i, info in enumerate(plugins):
-            self._plugin_table.setItem(i, 0, QLabel(info.name))
-            self._plugin_table.setItem(i, 1, QLabel(info.version))
-            self._plugin_table.setItem(i, 2, QLabel(info.description))
+            self._plugin_table.setItem(i, 0, QTableWidgetItem(info.name))
+            self._plugin_table.setItem(i, 1, QTableWidgetItem(info.version))
+            self._plugin_table.setItem(i, 2, QTableWidgetItem(info.description))
             status = "Loaded" if info.loaded else f"Error: {info.error}"
-            self._plugin_table.setItem(i, 3, QLabel(status))
+            self._plugin_table.setItem(i, 3, QTableWidgetItem(status))
 
     def _open_plugins_folder(self):
         plugin_dir = Path.home() / ".config" / "Osmograph" / "plugins"

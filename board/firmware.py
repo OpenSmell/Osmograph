@@ -30,9 +30,7 @@ class FirmwareRepository:
     @classmethod
     def initialize(cls, firmware_dir: str | Path) -> None:
         fw_dir = Path(firmware_dir)
-        if not fw_dir.exists():
-            fw_dir.mkdir(parents=True, exist_ok=True)
-
+        fw_dir.mkdir(parents=True, exist_ok=True)
         presets = cls._default_presets(fw_dir)
         for key, image in presets.items():
             cls._bundled[key] = image
@@ -42,50 +40,14 @@ class FirmwareRepository:
     @classmethod
     def _default_presets(cls, base: Path) -> dict[str, FirmwareImage]:
         return {
-            "3-sensor food": FirmwareImage(
-                name="firmware_3food",
-                path=str(base / "firmware_3food.bin"),
-                board="esp32",
-                sensor_count=3,
-                sensors=["MQ-135", "MQ-3", "MQ-7"],
-                pins=[34, 35, 32],
-                description="3-sensor food spoilage detection (MQ-135, MQ-3, MQ-7)",
-            ),
-            "4-sensor food": FirmwareImage(
-                name="firmware_4food",
-                path=str(base / "firmware_4food.bin"),
-                board="esp32",
-                sensor_count=4,
-                sensors=["MQ-135", "MQ-3", "MQ-6", "MQ-7"],
-                pins=[34, 35, 32, 33],
-                description="4-sensor food spoilage detection (+ MQ-6)",
-            ),
-            "3-sensor safety": FirmwareImage(
-                name="firmware_3safety",
-                path=str(base / "firmware_3safety.bin"),
-                board="esp32",
-                sensor_count=3,
-                sensors=["MQ-7", "MQ-8", "MQ-135"],
-                pins=[34, 35, 32],
-                description="3-sensor safety (CO, H₂, NH₃)",
-            ),
-            "4-sensor safety": FirmwareImage(
-                name="firmware_4safety",
-                path=str(base / "firmware_4safety.bin"),
-                board="esp32",
-                sensor_count=4,
-                sensors=["MQ-7", "MQ-8", "MQ-135", "MQ-3"],
-                pins=[34, 35, 32, 33],
-                description="4-sensor safety build (+ alcohol)",
-            ),
-            "6-sensor full": FirmwareImage(
-                name="firmware_6full",
-                path=str(base / "firmware_6full.bin"),
+            "universal": FirmwareImage(
+                name="firmware_universal",
+                path=str(base / "firmware_universal.bin"),
                 board="esp32",
                 sensor_count=6,
-                sensors=["MQ-135", "MQ-3", "MQ-6", "MQ-7", "MQ-4", "MQ-8"],
-                pins=[34, 35, 32, 33, 25, 26],
-                description="6-sensor full spectrum build",
+                sensors=["GPIO32", "GPIO33", "GPIO34", "GPIO35", "GPIO25", "GPIO26"],
+                pins=[32, 33, 34, 35, 25, 26],
+                description="Universal: USB Serial + WiFi AP. Works with 1-6 sensors on GPIO 32-35, 25-26.",
             ),
         }
 
@@ -93,14 +55,13 @@ class FirmwareRepository:
     def _generate_placeholder(cls, image: FirmwareImage) -> None:
         fw_path = Path(image.path)
         fw_path.parent.mkdir(parents=True, exist_ok=True)
-        header = (
-            f"# Osmograph firmware placeholder\n"
+        fw_path.write_text(
+            f"# Osmograph Universal Firmware\n"
             f"# Board: {image.board}\n"
-            f"# Sensors: {', '.join(image.sensors)}\n"
-            f"# Pins: {image.pins}\n"
-            f"# Flash this binary using esptool.py\n"
+            f"# Sensor pins: {image.pins}\n"
+            f"# Compile with PlatformIO, then flash with:\n"
+            f"#   esptool.py --chip esp32 --port PORT write_flash 0x10000 {image.path}\n"
         )
-        fw_path.write_text(header)
 
     @classmethod
     def list_presets(cls) -> list[FirmwareImage]:
@@ -112,10 +73,8 @@ class FirmwareRepository:
 
     @classmethod
     def find_for_config(cls, sensor_count: int, board: str = "esp32") -> Optional[FirmwareImage]:
-        for image in cls._bundled.values():
-            if image.sensor_count == sensor_count and image.board == board:
-                return image
-        return None
+        # Universal firmware works for any config
+        return cls._bundled.get("universal")
 
     @classmethod
     def get_preset_labels(cls) -> list[str]:

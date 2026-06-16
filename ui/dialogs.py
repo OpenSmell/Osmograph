@@ -144,7 +144,7 @@ class PinMappingDialog(QDialog):
     def __init__(self, sensors: list[str], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Pin Mapper")
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(500, 450)
         self.setStyleSheet(DARK_STYLESHEET)
 
         from Osmograph.sensor.pin_mapper import PinMapper

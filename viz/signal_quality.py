@@ -134,6 +134,8 @@ class SignalQualityIndicator(QWidget):
     def set_recording(self, recording: bool) -> None:
         if recording:
             self.set_level(SignalLevel.RECORDING)
+        elif self._level == SignalLevel.RECORDING:
+            self.set_level(SignalLevel.READY)
 
     @property
     def level(self) -> SignalLevel:
