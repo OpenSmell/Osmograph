@@ -775,26 +775,43 @@ class OsmographMainWindow(QMainWindow):
             self._board_label.setStyleSheet(f"color: {COLORS['accent_orange']}; padding: 0 8px;")
 
     def _flash_firmware(self, port: str, preset_name: str):
-        fw_image = FirmwareRepository.get(preset_name)
-        if not fw_image:
-            InfoDialog("Firmware Not Found", f"No firmware for preset: {preset_name}").exec()
-            return
+        preset = PresetManager.get(preset_name)
+        pins = preset.pins if preset else [34, 35, 32]
 
-        dialog = ProgressDialog("Flashing Firmware", f"Flashing {preset_name} to {port}...")
-        dialog.show()
+        from Osmograph.board.compiler import FirmwareCompiler
+        fw_dir = FirmwareCompiler.export_sketch(
+            Path.home() / ".cache" / "Osmograph" / "firmware",
+            pins=pins,
+        )
+        bin_path = fw_dir / ".pio" / "build" / "esp32" / "firmware.bin"
 
-        def on_progress(pct: int):
-            dialog.set_progress(pct)
+        if bin_path.exists():
+            dialog = ProgressDialog("Flashing", f"Flashing {preset_name} to {port}...")
+            dialog.show()
 
-        success, msg = self._flasher.flash(port, fw_image.path, progress_callback=on_progress)
-        dialog.close()
+            def on_progress(pct: int):
+                dialog.set_progress(pct)
 
-        if success:
-            InfoDialog("Flash Complete", msg).exec()
-            self._status.showMessage(f"Flashed {preset_name} to {port}", 5000)
-            QTimer.singleShot(2000, lambda: self._connect_serial_to_port(port))
+            success, msg = self._flasher.flash(port, str(bin_path), progress_callback=on_progress)
+            dialog.close()
+
+            if success:
+                InfoDialog("Flash Complete", msg).exec()
+                self._status.showMessage(f"Flashed {preset_name} to {port}", 5000)
+                QTimer.singleShot(2000, lambda: self._connect_serial_to_port(port))
+            else:
+                InfoDialog("Flash Failed", msg).exec()
         else:
-            InfoDialog("Flash Failed", msg).exec()
+    
+            InfoDialog(
+                "Compile Required",
+                f"Sketch exported to {fw_dir}\n\n"
+                "To compile and flash:\n"
+                "1. Install PlatformIO:  pip install platformio\n"
+                f"2. cd {fw_dir}\n"
+                "3. pio run -t upload --upload-port " + port + "\n\n"
+                "Or open the folder in VSCode with the PlatformIO extension."
+            ).exec()
 
     def _flash_firmware_dialog(self):
         port = self._port_combo.currentText()
