@@ -6,7 +6,7 @@ SKETCH_TEMPLATE = '''// Osmograph Universal Firmware
 //
 // TO CUSTOMIZE SENSOR PINS:
 //   Just edit the SENSOR_PINS array below with your GPIO pin numbers.
-//   The board will read them in order and send readings every ~100ms.
+//   The board will read them in order and send readings every 500ms.
 //
 //   Default pins: 32,33,34,35,25,26  (covers most MQ sensor boards)
 //   All ESP32 ADC-safe pins: 32,33,34,35,36,37,38,39,25,26,27,14,12,13
@@ -28,7 +28,7 @@ const int SENSOR_COUNT = sizeof(SENSOR_PINS) / sizeof(SENSOR_PINS[0]);
 // ────────────────────────────────────────────────────────────────────
 
 const int TCP_PORT = 8080;
-const unsigned long PRINT_INTERVAL = 100;
+const unsigned long PRINT_INTERVAL = 500;
 
 unsigned long lastPrint = 0;
 WiFiServer server(TCP_PORT);
@@ -93,22 +93,23 @@ void handleClients() {
 }
 
 void readAndSend() {
-    String data = "OSM";
-    for (int i = 0; i < SENSOR_COUNT; i++) {
-        data += ",";
-        data += String(analogRead(SENSOR_PINS[i]));
+    char buf[64];
+    int pos = snprintf(buf, sizeof(buf), "OSM");
+    for (int i = 0; i < SENSOR_COUNT && i < 6; i++) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, ",%d", analogRead(SENSOR_PINS[i]));
     }
-    data += "\\n";
+    buf[pos] = '\\n';
+    buf[pos + 1] = '\\0';
 
     // USB Serial (only if host has opened the port)
     if (Serial) {
-        Serial.print(data);
+        Serial.print(buf);
     }
 
     // WiFi TCP
     for (int i = 0; i < 8; i++) {
         if (clients[i] && clients[i].connected()) {
-            clients[i].print(data);
+            clients[i].print(buf);
         }
     }
 }

@@ -1,3 +1,4 @@
+import time
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -132,6 +133,10 @@ class DashboardWidget(QWidget):
         if self._classifier and self._classifier.is_loaded:
             result = self._classifier.add_sample(sample)
             if result is not None:
+                now = time.monotonic()
+                if now - getattr(self, '_last_prediction_time', 0) < 0.4:
+                    return
+                self._last_prediction_time = now
                 label, confidence = result
                 self._update_competition_grid()
                 if not self._classifier.is_unknown:
