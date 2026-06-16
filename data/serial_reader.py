@@ -60,6 +60,7 @@ class SerialReader(QThread):
         try:
             if self._serial and self._serial.is_open:
                 self._serial.close()
+            logger.info(f"Opening serial port {self._port} @ {self._baud}")
             self._serial = serial.Serial(
                 port=self._port,
                 baudrate=self._baud,
@@ -74,8 +75,21 @@ class SerialReader(QThread):
             self.connection_changed.emit(True, f"Connected to {self._port}")
             logger.info(f"Serial connected: {self._port} @ {self._baud}")
             return True, "Connected"
+        except serial.SerialException as e:
+            self._state = ReadState.ERROR
+            err = str(e)
+            logger.error(f"Serial connect failed: {err}")
+            if "Permission denied" in err or "could not open port" in err:
+                hint = ("Permission denied. Add your user to the 'dialout' group:\n"
+                        "  sudo usermod -a -G dialout $USER\n"
+                        "Then log out and back in.")
+                self.connection_changed.emit(False, hint)
+                return False, hint
+            self.connection_changed.emit(False, err)
+            return False, err
         except Exception as e:
             self._state = ReadState.ERROR
+            logger.error(f"Serial connect unexpected error: {e}")
             self.connection_changed.emit(False, str(e))
             return False, str(e)
 
@@ -147,6 +161,8 @@ class SerialReader(QThread):
     def _parse_line(self, line: bytes):
         try:
             decoded = line.decode("utf-8", errors="replace").strip()
+            if not decoded:
+                return None
 
             if decoded.startswith("OSM") or "OSM" in decoded:
                 decoded = decoded.replace("OSM", "").strip()
@@ -165,9 +181,12 @@ class SerialReader(QThread):
                 arr = np.array(values[:6], dtype=np.float32)
                 if len(values) < 6:
                     arr = np.pad(arr, (0, 6 - len(arr)), constant_values=0.0)
+                logger.debug(f"Parsed {len(values)} values: {values[:6]}")
                 return arr
+            logger.debug(f"Skipping non-data line: {decoded[:80]}")
             return None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Parse error: {e}")
             return None
 
     def write_command(self, cmd: str) -> bool:

@@ -37,8 +37,10 @@ WiFiClient clients[8];
 void setup() {
     Serial.begin(115200);
     analogReadResolution(12);
+    delay(500);
     for (int i = 0; i < SENSOR_COUNT; i++) {
         pinMode(SENSOR_PINS[i], INPUT);
+        analogSetPinAttenuation(SENSOR_PINS[i], ADC_11db);
     }
 
     // Start WiFi AP
@@ -47,11 +49,15 @@ void setup() {
     char ssid[32];
     snprintf(ssid, sizeof(ssid), "OSMOGRAPH-%02X%02X%02X", mac[3], mac[4], mac[5]);
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(ssid, NULL);
+    bool apOk = WiFi.softAP(ssid, NULL);
     Serial.print("WiFi AP: ");
     Serial.print(ssid);
-    Serial.print(" IP: ");
-    Serial.println(WiFi.softAPIP());
+    if (apOk) {
+        Serial.print(" OK, IP: ");
+        Serial.println(WiFi.softAPIP());
+    } else {
+        Serial.println(" FAILED");
+    }
 
     server.begin();
 
@@ -94,8 +100,10 @@ void readAndSend() {
     }
     data += "\\n";
 
-    // USB Serial
-    Serial.print(data);
+    // USB Serial (only if host has opened the port)
+    if (Serial) {
+        Serial.print(data);
+    }
 
     // WiFi TCP
     for (int i = 0; i < 8; i++) {
