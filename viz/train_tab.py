@@ -17,7 +17,7 @@ from Osmograph.viz.realtime_classifier import extract_features
 
 logger = logging.getLogger(__name__)
 
-FW_DIR = Path(__file__).resolve().parent.parent.parent / "electronic-nose" / "test-data"
+FW_DIR = Path.home() / "Osmograph_Recordings" / "legacy"
 REC_DIR = Path.home() / "Osmograph_Recordings"
 CLASSIFIERS_DIR = Path(__file__).resolve().parent.parent / "classifiers"
 
