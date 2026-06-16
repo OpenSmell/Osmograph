@@ -123,9 +123,9 @@ void loop() {
 }
 '''
 
-PLATFORMIO_INI = '''[env:esp32]
+PLATFORMIO_INI = '''[env:esp32dev]
 platform = espressif32
-board = esp32
+board = esp32dev
 framework = arduino
 monitor_speed = 115200
 board_build.flash_mode = dio

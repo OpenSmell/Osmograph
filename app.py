@@ -775,43 +775,34 @@ class OsmographMainWindow(QMainWindow):
             self._board_label.setStyleSheet(f"color: {COLORS['accent_orange']}; padding: 0 8px;")
 
     def _flash_firmware(self, port: str, preset_name: str):
-        preset = PresetManager.get(preset_name)
-        pins = preset.pins if preset else [34, 35, 32]
+        fw_image = FirmwareRepository.get(preset_name)
+        if not fw_image:
+            InfoDialog("Firmware Not Found", f"No firmware for preset: {preset_name}").exec()
+            return
 
-        from Osmograph.board.compiler import FirmwareCompiler
-        fw_dir = FirmwareCompiler.export_sketch(
-            Path.home() / ".cache" / "Osmograph" / "firmware",
-            pins=pins,
-        )
-        bin_path = fw_dir / ".pio" / "build" / "esp32" / "firmware.bin"
-
-        if bin_path.exists():
-            dialog = ProgressDialog("Flashing", f"Flashing {preset_name} to {port}...")
-            dialog.show()
-
-            def on_progress(pct: int):
-                dialog.set_progress(pct)
-
-            success, msg = self._flasher.flash(port, str(bin_path), progress_callback=on_progress)
-            dialog.close()
-
-            if success:
-                InfoDialog("Flash Complete", msg).exec()
-                self._status.showMessage(f"Flashed {preset_name} to {port}", 5000)
-                QTimer.singleShot(2000, lambda: self._connect_serial_to_port(port))
-            else:
-                InfoDialog("Flash Failed", msg).exec()
-        else:
-    
+        if not Path(fw_image.path).exists():
             InfoDialog(
-                "Compile Required",
-                f"Sketch exported to {fw_dir}\n\n"
-                "To compile and flash:\n"
-                "1. Install PlatformIO:  pip install platformio\n"
-                f"2. cd {fw_dir}\n"
-                "3. pio run -t upload --upload-port " + port + "\n\n"
-                "Or open the folder in VSCode with the PlatformIO extension."
+                "Firmware Missing",
+                f"Firmware binary not found at:\n  {fw_image.path}\n\n"
+                "Run 'make firmware' from the Osmograph project root to build it."
             ).exec()
+            return
+
+        dialog = ProgressDialog("Flashing Firmware", f"Flashing {preset_name} to {port}...")
+        dialog.show()
+
+        def on_progress(pct: int):
+            dialog.set_progress(pct)
+
+        success, msg = self._flasher.flash(port, fw_image.path, progress_callback=on_progress)
+        dialog.close()
+
+        if success:
+            InfoDialog("Flash Complete", msg).exec()
+            self._status.showMessage(f"Flashed {preset_name} to {port}", 5000)
+            QTimer.singleShot(2000, lambda: self._connect_serial_to_port(port))
+        else:
+            InfoDialog("Flash Failed", msg).exec()
 
     def _flash_firmware_dialog(self):
         port = self._port_combo.currentText()
