@@ -1,8 +1,9 @@
 # Osmograph — Electronic Nose Desktop Application
 
 ![Osmograph screenshot](screenshot.png)
+*Osmograph showing real-time sensor traces, competition grid with class probabilities, and the substance identification display.*
 
-All-in-one GUI for OpenSmell hardware: connect to your ESP32 board, record sensor sessions, train classifiers, and identify substances in real time.
+Desktop GUI for OpenSmell hardware: connect to your ESP32 board, record sensor sessions, train classifiers, and identify substances in real time.
 
 ## Quick Start
 
@@ -18,14 +19,14 @@ python -m Osmograph
 
 ```
 Osmograph/
-├── board/          # Board detection, firmware compiler (universal WiFi + Serial)
+├── board/          # Board detection, firmware compiler (WiFi + Serial)
 ├── sensor/         # Sensor profiles, pin mapping, hardware presets
 ├── data/           # Serial reader, WiFi reader, CSV recorder, session management
 ├── viz/            # Live traces, competition grid, substance display, chemoprint
 ├── burnin/         # Persistent burn-in timer
 ├── wizard/         # Adapter training wizard
 ├── ui/             # Dark theme, dialogs
-├── firmware/       # Pre-compiled universal firmware binary
+├── firmware/       # Pre-compiled firmware binary
 ├── classifiers/    # User-trained classifier models (.pkl)
 └── app.py          # Main window
 ```
@@ -33,24 +34,24 @@ Osmograph/
 ## Features
 
 - **Board Manager**: Auto-detect ESP32, one-click firmware flash via esptool
-- **Dual-mode connection**: USB Serial or WiFi (ESP32 creates an AP + TCP server)
+- **USB Serial and WiFi**: connect over USB or the ESP32's built-in AP + TCP server (both active simultaneously, no modes to select)
 - **Live Visualization**: PyQtGraph real-time traces, competition grid, substance display
 - **Recording**: Labeled CSV sessions with auto-save
 - **Classifier Training**: Record a few substances, train a RandomForest or LogisticRegression model
 - **Real-time Prediction**: Competition grid animates with class probabilities; locks on sustained high confidence
 - **Burn-In Tracker**: 24h sensor stabilization countdown across restarts
-- **Plugin System**: Drop `.py` files with a `run(latent_vector)` function
+- **Plugin System**: Drop `.py` plugin scripts or `.head` model files into the plugins folder — each exposes a `run(latent_vector)` function called on every prediction
 
 ## Firmware
 
-Osmograph includes a universal ESP32 firmware that works with any sensor count (1–6 MQ sensors).
+Osmograph includes an ESP32 firmware that works with any sensor count (1–6 MQ sensors).
 
 - **USB Serial** + **WiFi AP** simultaneously — no modes to select
 - **No PlatformIO required**: the app flashes a pre-compiled binary via esptool
-- **Custom pins**: edit the `SENSOR_PINS[]` array in `board/compiler.py` and recompile, or use the Pin Mapping dialog in the app to export a custom sketch
+- **Custom pins**: use the Pin Mapping dialog in the app to export a custom sketch, or if compiling from source, edit the `SENSOR_PINS[]` array in `board/compiler.py`
 - **Data format**: each line is `OSM,<adc0>,<adc1>,...` over serial or TCP (port 8080)
 
-The firmware source lives in [`board/compiler.py`](board/compiler.py). The pre-compiled binary at `firmware/firmware_universal.bin` is built with all 6 default GPIO pins and works with any subset of connected sensors.
+The pre-compiled binary at `firmware/firmware_universal.bin` works with any subset of sensors and is flashed via esptool — no PlatformIO or VSCode needed. The firmware source lives in [`board/compiler.py`](board/compiler.py) if you want to customise and recompile.
 
 ## Hardware Presets
 

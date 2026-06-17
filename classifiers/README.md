@@ -2,9 +2,9 @@
 
 Trained models for real-time substance identification. Models in this directory are trained by the user via the Osmograph Train tab.
 
-## Model Format
+Classifiers are stored as `.pkl` files and are local to your machine (listed in `.gitignore` — not pushed to the repo). Each contains the trained model, label encoder, and metadata for Osmograph to load and run predictions.
 
-Each `.pkl` file contains a dictionary:
+## Model Format
 
 ```python
 {
@@ -13,7 +13,7 @@ Each `.pkl` file contains a dictionary:
     "classes": list[str],
     "scaler": StandardScaler | None,
     "classifier_name": str,
-    "n_sensors": int,
+    "n_sensors": int,       # stored at training time; actual sensor count detected at runtime
     "n_features": int,
     "window_size": int,
     "training_accuracy": float,
@@ -22,17 +22,7 @@ Each `.pkl` file contains a dictionary:
 
 ## Feature Extraction
 
-All models use **paradigm features** (5 per channel: delta_ratio, direction, mean_slope, auc, endpoint_delta) computed from R₀-normalized sensor data. This is device-agnostic.
-
-## Included Reference Models
-
-The following `.pkl` files are pre-trained on the [SmellNet](https://github.com/opensmell/SmellNet) dataset (44 food substances, 6-sensor reference hardware). They serve as examples but may not work on other hardware without adaptation.
-
-- `smellnet_4class_paradigm.pkl` — 4-class (garlic, ginger, lemon, cinnamon). Trained on SmellNet data using paradigm features.
-
-### Archive
-
-- `archive/` — Legacy models using old 48-dim statistical features. Kept for backward compatibility.
+All models use **paradigm features** (5 per channel: delta_ratio, direction, mean_slope, auc, endpoint_delta) computed from R₀-normalized sensor data. These features are device-agnostic — a model trained on one board can transfer to another with the same sensor types.
 
 ## Training Your Own
 
