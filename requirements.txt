@@ -13,7 +13,7 @@ pyserial>=3.5
 esptool>=4.0
 
 # OpenSmell SDK (in-project dependency)
-# Add the parent opensmell/ directory to PYTHONPATH
+-e ../opensmell
 
 # Optional: adapter training
 scikit-learn>=1.2.0

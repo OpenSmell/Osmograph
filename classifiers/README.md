@@ -1,6 +1,6 @@
 # Classifiers
 
-Trained LogisticRegression models for real-time substance identification.
+Trained models for real-time substance identification. Models in this directory are trained by the user via the Osmograph Train tab.
 
 ## Model Format
 
@@ -8,15 +8,15 @@ Each `.pkl` file contains a dictionary:
 
 ```python
 {
-    "clf": LogisticRegression,        # Trained classifier
-    "label_encoder": LabelEncoder,    # Label → integer encoding
-    "classes": list[str],             # Class names
-    "scaler": StandardScaler,         # Feature scaler
-    "classifier_name": str,           # User-given name
-    "n_sensors": int,                 # Sensor channels used during training
-    "n_features": int,                # Feature dimensions (30 for paradigm)
-    "window_size": int,               # Window size in samples
-    "training_accuracy": float,       # Training accuracy
+    "clf": RandomForestClassifier | LogisticRegression,
+    "label_encoder": LabelEncoder,
+    "classes": list[str],
+    "scaler": StandardScaler | None,
+    "classifier_name": str,
+    "n_sensors": int,
+    "n_features": int,
+    "window_size": int,
+    "training_accuracy": float,
 }
 ```
 
@@ -24,19 +24,27 @@ Each `.pkl` file contains a dictionary:
 
 All models use **paradigm features** (5 per channel: delta_ratio, direction, mean_slope, auc, endpoint_delta) computed from R₀-normalized sensor data. This is device-agnostic.
 
-## Included Models
+## Included Reference Models
 
-- `garlic_ginger_onion_air.pkl` — 4-class (garlic, ginger, onion, room_air)
-- `garlic_ginger_onion.pkl` — 3-class (garlic, ginger, onion)
-- `garlic_ginger.pkl` — 2-class (garlic, ginger)
+The following `.pkl` files are pre-trained on the [SmellNet](https://github.com/opensmell/SmellNet) dataset (44 food substances, 6-sensor reference hardware). They serve as examples but may not work on other hardware without adaptation.
+
+- `smellnet_4class_paradigm.pkl` — 4-class (garlic, ginger, lemon, cinnamon). Trained on SmellNet data using paradigm features.
 
 ### Archive
 
-- `archive/all_substances_(4).pkl` — Legacy model, uses old 48-dim statistical features (z-score + 8 per channel). Kept for backward compatibility.
+- `archive/` — Legacy models using old 48-dim statistical features. Kept for backward compatibility.
 
 ## Training Your Own
 
-Use the Train tab in Osmograph, or run:
+Use the **Train** tab in Osmograph:
+1. Connect your board and record 30+ seconds per substance
+2. Open the Train tab, click **Discover Recordings**
+3. Assign labels and click **Train Classifier**
+4. The trained model appears in the classifier dropdown automatically
+
+Or run from the command line:
 ```bash
 python train_classifiers.py
 ```
+
+Training uses RandomForest by default (test better on small e-nose datasets than logistic regression). See `train_classifiers.py` for the full pipeline.

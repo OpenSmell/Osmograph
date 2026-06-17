@@ -1,12 +1,16 @@
 # Osmograph — Electronic Nose Desktop Application
 
-All-in-one GUI for OpenSmell hardware: manage ESP32 boards, record sensor sessions, train adapters, and visualize chemoprints.
+![Osmograph screenshot](screenshot.png)
+
+All-in-one GUI for OpenSmell hardware: connect to your ESP32 board, record sensor sessions, train classifiers, and identify substances in real time.
 
 ## Quick Start
 
 ```bash
+# Install dependencies
 pip install -r requirements.txt
-export PYTHONPATH="$PYTHONPATH:$PWD/../opensmell"
+
+# Launch
 python -m Osmograph
 ```
 
@@ -14,42 +18,42 @@ python -m Osmograph
 
 ```
 Osmograph/
-├── board/          # Board detection, firmware flashing
-├── sensor/         # Sensor profiles, pin mapping, presets
-├── data/           # Serial reader, CSV recorder, session management
-├── viz/            # Live traces, chemoprint bar chart
+├── board/          # Board detection, firmware compiler (universal WiFi + Serial)
+├── sensor/         # Sensor profiles, pin mapping, hardware presets
+├── data/           # Serial reader, WiFi reader, CSV recorder, session management
+├── viz/            # Live traces, competition grid, substance display, chemoprint
 ├── burnin/         # Persistent burn-in timer
 ├── wizard/         # Adapter training wizard
-├── plugins/        # Plugin system
 ├── ui/             # Dark theme, dialogs
-├── firmware/       # Pre-compiled .bin files (3-sensor, 4-sensor, 6-sensor)
+├── firmware/       # Pre-compiled universal firmware binary
+├── classifiers/    # User-trained classifier models (.pkl)
 └── app.py          # Main window
 ```
 
 ## Features
 
-- **Board Manager**: Auto-detect ESP32, one-click firmware flash
-- **Sensor Configurator**: Preset profiles or custom pin mapping
-- **Live Visualization**: PyQtGraph real-time traces, 29-dim chemoprint
+- **Board Manager**: Auto-detect ESP32, one-click firmware flash via esptool
+- **Dual-mode connection**: USB Serial or WiFi (ESP32 creates an AP + TCP server)
+- **Live Visualization**: PyQtGraph real-time traces, competition grid, substance display
 - **Recording**: Labeled CSV sessions with auto-save
-- **Burn-In Tracker**: 24h countdown across restarts
-- **Adapter Wizard**: Record 3–5 substances, train with one click
+- **Classifier Training**: Record a few substances, train a RandomForest or LogisticRegression model
+- **Real-time Prediction**: Competition grid animates with class probabilities; locks on sustained high confidence
+- **Burn-In Tracker**: 24h sensor stabilization countdown across restarts
 - **Plugin System**: Drop `.py` files with a `run(latent_vector)` function
 
 ## Firmware
 
-Pre-compiled firmware binaries for different sensor configurations are in `firmware/`. The source code for these binaries is in the [electronic-nose](https://github.com/opensmell/electronic-nose) repository.
+Osmograph includes a universal ESP32 firmware that works with any sensor count (1–6 MQ sensors).
 
-| Binary | Sensors |
-|--------|---------|
-| `firmware_3food.bin` | MQ-135, MQ-3, MQ-7 |
-| `firmware_3safety.bin` | MQ-7, MQ-135, MQ-6 |
-| `firmware_4food.bin` | MQ-135, MQ-3, MQ-6, MQ-7 |
-| `firmware_4safety.bin` | MQ-7, MQ-135, MQ-6, MQ-8 |
-| `firmware_6full.bin` | All 6 MQ sensors |
+- **USB Serial** + **WiFi AP** simultaneously — no modes to select
+- **No PlatformIO required**: the app flashes a pre-compiled binary via esptool
+- **Custom pins**: edit the `SENSOR_PINS[]` array in `board/compiler.py` and recompile, or use the Pin Mapping dialog in the app to export a custom sketch
+- **Data format**: each line is `OSM,<adc0>,<adc1>,...` over serial or TCP (port 8080)
 
-## Scalability
+The firmware source lives in [`board/compiler.py`](board/compiler.py). The pre-compiled binary at `firmware/firmware_universal.bin` is built with all 6 default GPIO pins and works with any subset of connected sensors.
 
-The Osmograph's `sensor/presets.py` defines pin mappings for different sensor configurations. To add your own hardware:
-1. Add a new preset to `sensor/presets.py` with your pin mapping
-2. The app handles the rest
+## Hardware Presets
+
+The app ships with common sensor configurations in `sensor/presets.py`. When you auto-detect a board, you select the preset that matches your hardware, and Osmograph handles the rest — including flashing the correct firmware.
+
+To add a custom configuration, add a new entry to `sensor/presets.py` with your pin mapping.
