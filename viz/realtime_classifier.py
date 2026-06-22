@@ -18,7 +18,10 @@ UNKNOWN_THRESHOLD = 0.5
 UNKNOWN_CONSECUTIVE = 20
 
 
-def extract_features(window: np.ndarray) -> np.ndarray:
+def extract_features(window: np.ndarray, method: str = "framework") -> np.ndarray:
+    from Osmograph.viz.paradigm_features import compute_framework_features, compute_window_paradigms
+    if method == "framework" and window.shape[0] >= 15:
+        return compute_framework_features(window)
     return compute_window_paradigms(window, r0_samples=3)
 
 
@@ -221,14 +224,16 @@ class RealtimeClassifier:
         else:
             raw = window[:, :6]
 
-        n_expected = self._scaler.mean_.shape[0] if self._scaler is not None else 30
+        n_expected = self._scaler.mean_.shape[0] if self._scaler is not None else 145
 
         if n_expected == 48:
             self._lazy_import_preprocessing()
             zed = self.per_recording_zscore(raw)
             feats = _extract_features_legacy(zed).reshape(1, -1)
+        elif n_expected == 145:
+            feats = extract_features(raw, method="framework").reshape(1, -1)
         else:
-            feats = extract_features(raw).reshape(1, -1)
+            feats = extract_features(raw, method="paradigm").reshape(1, -1)
 
         if self._scaler is not None:
             feats = self._scaler.transform(feats)

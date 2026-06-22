@@ -272,7 +272,7 @@ class TrainTab(QWidget):
         config_layout.addWidget(QLabel("Window:"))
         self._window_spin = QSpinBox()
         self._window_spin.setRange(20, 500)
-        self._window_spin.setValue(50)
+        self._window_spin.setValue(100)
         self._window_spin.setSuffix(" samples")
         config_layout.addWidget(self._window_spin)
 
