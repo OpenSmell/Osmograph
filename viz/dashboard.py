@@ -7,20 +7,12 @@ from PySide6.QtWidgets import (
 import numpy as np
 
 from Osmograph.viz.traces import LiveTracesWidget
-from Osmograph.viz.chemprint import SensorAmplitudeWidget
 from Osmograph.viz.fingerprint import RadarFingerprintWidget
 from Osmograph.viz.signal_quality import SignalQualityIndicator, SignalLevel
 from Osmograph.viz.substance import SubstanceDisplay
 from Osmograph.viz.competition_grid import CompetitionGrid
+from Osmograph.viz.device_health import DeviceHealthWidget
 from Osmograph.ui.theme import COLORS
-
-SENSOR_NAMES = ["MQ-135", "MQ-3", "MQ-6", "MQ-7", "MQ-4", "MQ-8"]
-
-QUALITY_MAP = {
-    "good": (0, 200, 80),
-    "warning": (200, 180, 0),
-    "error": (220, 50, 50),
-}
 
 
 class DashboardWidget(QWidget):
@@ -48,14 +40,26 @@ class DashboardWidget(QWidget):
         top_bar.addWidget(self._sample_count_label)
 
         top_bar.addStretch()
+
+        self._fp_btn = QPushButton("FP")
+        self._fp_btn.setFixedSize(28, 22)
+        self._fp_btn.setToolTip("Toggle fingerprint overlay")
+        self._fp_btn.setStyleSheet(
+            f"font-size: 8px; font-weight: bold; padding: 0; "
+            f"background: {COLORS['bg_tertiary']}; color: {COLORS['text_secondary']}; "
+            f"border: 1px solid {COLORS['border']}; border-radius: 3px;"
+        )
+        self._fp_btn.clicked.connect(self._toggle_fingerprint)
+        top_bar.addWidget(self._fp_btn)
+
         self._reset_btn = QPushButton("Reset")
-        self._reset_btn.setFixedWidth(70)
+        self._reset_btn.setFixedWidth(60)
         self._reset_btn.clicked.connect(self.reset)
         self._reset_btn.setToolTip("Clear all traces and predictions")
         top_bar.addWidget(self._reset_btn)
 
         self._pause_btn = QPushButton("Pause")
-        self._pause_btn.setFixedWidth(70)
+        self._pause_btn.setFixedWidth(60)
         self._pause_btn.clicked.connect(self._toggle_pause)
         self._pause_btn.setToolTip("Freeze/unfreeze the trace display")
         top_bar.addWidget(self._pause_btn)
@@ -69,21 +73,19 @@ class DashboardWidget(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(4)
 
+        self._left_split = QSplitter(Qt.Vertical)
+        self._left_split.setHandleWidth(1)
+
         self.traces = LiveTracesWidget()
         self.traces.set_sensor_count(sensor_count)
-        left_layout.addWidget(self.traces, 3)
-
-        bottom_split = QSplitter(Qt.Horizontal)
-        bottom_split.setHandleWidth(1)
+        self._left_split.addWidget(self.traces)
 
         self.fingerprint = RadarFingerprintWidget()
-        bottom_split.addWidget(self.fingerprint)
+        self._left_split.addWidget(self.fingerprint)
+        self._fp_visible = True
 
-        self.sensor_amplitudes = SensorAmplitudeWidget()
-        bottom_split.addWidget(self.sensor_amplitudes)
-
-        bottom_split.setSizes([250, 200])
-        left_layout.addWidget(bottom_split, 1)
+        self._left_split.setSizes([350, 140])
+        left_layout.addWidget(self._left_split)
 
         content.addWidget(left_panel)
 
@@ -95,6 +97,9 @@ class DashboardWidget(QWidget):
 
         self.signal_quality = SignalQualityIndicator()
         right_layout.addWidget(self.signal_quality)
+
+        self.device_health = DeviceHealthWidget()
+        right_layout.addWidget(self.device_health)
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -124,7 +129,7 @@ class DashboardWidget(QWidget):
         self._hint_label = QLabel(
             "Welcome to Osmograph\n"
             "Connect your ESP32 via USB \u2192 Detect Board \u2192 Connect\n"
-            "Or load a CSV recording from the Sessions tab"
+            "Or click Demo for simulated data \u2192 Recordings tab to import CSV"
         )
         self._hint_label.setAlignment(Qt.AlignCenter)
         self._hint_label.setStyleSheet(
@@ -197,9 +202,6 @@ class DashboardWidget(QWidget):
     ) -> None:
         self.substance.update_prediction(substance, confidence, warning)
 
-    def update_amplitudes(self, amplitudes: np.ndarray) -> None:
-        self.sensor_amplitudes.update_amplitudes(amplitudes)
-
     def update_fingerprint(self, features: dict, label: str = "") -> None:
         self.fingerprint.set_fingerprint(features, label)
 
@@ -213,11 +215,21 @@ class DashboardWidget(QWidget):
 
     def update_theme(self) -> None:
         self.traces.update_theme()
-        self.sensor_amplitudes.update_theme()
         self.fingerprint.update_theme()
         self.signal_quality.update_theme()
+        self.device_health.update_theme()
         self.substance.update_theme()
         self.competition.update_theme()
+        self._hint_label.setStyleSheet(
+            f"color: {COLORS['text_secondary']}; background: {COLORS['bg_secondary']}; "
+            f"border: 1px dashed {COLORS['border']}; border-radius: 8px; "
+            f"padding: 16px; font-size: 12px; line-height: 1.6;"
+        )
+        self._fp_btn.setStyleSheet(
+            f"font-size: 8px; font-weight: bold; padding: 0; "
+            f"background: {COLORS['bg_tertiary']}; color: {COLORS['text_secondary']}; "
+            f"border: 1px solid {COLORS['border']}; border-radius: 3px;"
+        )
 
     def set_sensor_count(self, count: int) -> None:
         self._sensor_count = count
@@ -238,6 +250,15 @@ class DashboardWidget(QWidget):
 
     def set_connected(self, connected: bool):
         self._hint_label.setVisible(not connected)
+
+    def _toggle_fingerprint(self) -> None:
+        self._fp_visible = not self._fp_visible
+        self.fingerprint.setVisible(self._fp_visible)
+        sizes = self._left_split.sizes()
+        if self._fp_visible:
+            self._left_split.setSizes([max(1, sizes[0] - 140), 140])
+        else:
+            self._left_split.setSizes([sum(sizes), 0])
 
     def _toggle_pause(self) -> None:
         self.traces.toggle_pause()
@@ -260,16 +281,22 @@ class DashboardWidget(QWidget):
                     stability = max(
                         0, min(100, 100 * (1 - min(var / 500, 1)))
                     )
+                    noise = float(np.std(col))
+                    if len(col) > 5:
+                        drift = float(np.polyfit(np.arange(len(col)), col, 1)[0])
+                    else:
+                        drift = 0.0
                     per_sensor.append(
-                        {"variance": var, "stability": stability}
+                        {"variance": var, "stability": stability,
+                         "noise": noise, "drift": drift}
                     )
                 self.update_quality_metrics(per_sensor)
                 self.signal_quality.update_from_metrics(per_sensor)
+                self.device_health.update_health(per_sensor)
 
     def reset(self) -> None:
         self.traces.reset()
         self.substance.clear()
         self.signal_quality.reset_warmup()
-        self.sensor_amplitudes.clear()
         self.competition.reset()
         self._sample_count_label.setText("Samples: 0")

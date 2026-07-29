@@ -72,6 +72,8 @@ class OsmographMainWindow(QMainWindow):
         self._recording_duration = 0.0
         self._recording_timer = QTimer(self)
         self._recording_timer.timeout.connect(self._update_recording_countdown)
+        self._demo_timer = QTimer(self)
+        self._demo_timer.timeout.connect(self._generate_demo_sample)
 
         FirmwareRepository.initialize(self._firmware_dir)
         self._setup_ui()
@@ -100,35 +102,21 @@ class OsmographMainWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
 
+        # Tab 1: Dashboard — live sensor monitoring
         self.dashboard = DashboardWidget()
         self.dashboard.set_classifier(self._classifier)
         self._tabs.addTab(self.dashboard, "Dashboard")
-        self._tabs.setTabToolTip(0, "Live sensor traces, chemoprint, predictions")
+        self._tabs.setTabToolTip(0, "Live sensor traces, fingerprint, predictions")
 
-        self._session_tab = self._build_session_tab()
-        self._tabs.addTab(self._session_tab, "Sessions")
-        self._tabs.setTabToolTip(1, "Browse, process, and manage recordings")
+        # Tab 2: Recordings — browse, train, adapter (sub-tabs)
+        self._recordings_tab = self._build_recordings_tab()
+        self._tabs.addTab(self._recordings_tab, "Recordings")
+        self._tabs.setTabToolTip(1, "Browse recordings, train classifiers, train adapters")
 
-        self._train_tab = TrainTab(n_sensors=self._classifier.n_sensors)
-        self._train_tab.training_complete.connect(self._on_train_complete)
-        self._tabs.addTab(self._train_tab, "Train")
-        self._tabs.setTabToolTip(2, "Train a real-time substance classifier from your recordings")
-
-        self._adapter_tab = self._build_adapter_tab()
-        self._tabs.addTab(self._adapter_tab, "Adapter")
-        self._tabs.setTabToolTip(3, "Train a lightweight adapter on your samples")
-
-        self._plugin_tab = self._build_plugin_tab()
-        self._tabs.addTab(self._plugin_tab, "Plugins")
-        self._tabs.setTabToolTip(4, "Manage OpenSmell plugins and model heads")
-
-        self._settings_tab = self._build_settings_tab()
-        self._tabs.addTab(self._settings_tab, "Settings")
-        self._tabs.setTabToolTip(5, "Serial connection and data directory settings")
-
-        self._burnin_tab = self._build_burnin_tab()
-        self._tabs.addTab(self._burnin_tab, "Burn-In")
-        self._tabs.setTabToolTip(6, "Track sensor burn-in time (24h recommended for new MQ sensors)")
+        # Tab 3: System — settings, burn-in, plugins (sub-tabs)
+        self._system_tab = self._build_system_tab()
+        self._tabs.addTab(self._system_tab, "System")
+        self._tabs.setTabToolTip(2, "Connection settings, classifier config, burn-in, plugins")
 
         layout.addWidget(self._tabs)
 
@@ -207,7 +195,7 @@ class OsmographMainWindow(QMainWindow):
         tools_menu = menubar.addMenu("&Tools")
         wizard_action = QAction("&Adapter Wizard", self)
         wizard_action.setShortcut("Ctrl+W")
-        wizard_action.triggered.connect(lambda: self._tabs.setCurrentWidget(self._adapter_tab))
+        wizard_action.triggered.connect(self._open_adapter_wizard)
         tools_menu.addAction(wizard_action)
 
         pin_action = QAction("&Pin Mapper...", self)
@@ -251,8 +239,9 @@ class OsmographMainWindow(QMainWindow):
         self._status.addPermanentWidget(self._serial_label)
 
     def _build_toolbar(self) -> QWidget:
-        toolbar = QWidget()
-        toolbar.setStyleSheet(f"background-color: {COLORS['bg_med']}; border-radius: 4px;")
+        self._toolbar = QWidget()
+        toolbar = self._toolbar
+        toolbar.setStyleSheet(f"background-color: {COLORS['bg_secondary']}; border-radius: 4px;")
         layout = QHBoxLayout(toolbar)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
@@ -278,6 +267,12 @@ class OsmographMainWindow(QMainWindow):
         self._connect_btn.setToolTip("Open the serial connection to the selected port")
         self._connect_btn.clicked.connect(self._toggle_connection)
         layout.addWidget(self._connect_btn)
+
+        self._demo_btn = QPushButton("Demo")
+        self._demo_btn.setToolTip("Run in demo mode with simulated sensor data (no hardware needed)")
+        self._demo_btn.setCheckable(True)
+        self._demo_btn.clicked.connect(self._toggle_demo)
+        layout.addWidget(self._demo_btn)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
@@ -338,17 +333,53 @@ class OsmographMainWindow(QMainWindow):
 
         return toolbar
 
-    def _build_session_tab(self) -> QWidget:
+    def _build_recordings_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._rec_tabs = QTabWidget()
+        self._rec_tabs.setDocumentMode(True)
+        self._rec_tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; }"
+        )
+
+        self._browse_tab = self._build_browse_tab()
+        self._rec_tabs.addTab(self._browse_tab, "Browse")
+
+        self._train_tab = TrainTab(n_sensors=self._classifier.n_sensors)
+        self._train_tab.training_complete.connect(self._on_train_complete)
+        self._rec_tabs.addTab(self._train_tab, "Train")
+
+        self._adapter_tab = self._build_adapter_tab()
+        self._rec_tabs.addTab(self._adapter_tab, "Adapter")
+
+        layout.addWidget(self._rec_tabs)
+        return w
+
+    def _build_browse_tab(self) -> QWidget:
         from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
         w = QWidget()
         layout = QVBoxLayout(w)
+        layout.setContentsMargins(8, 8, 8, 8)
 
         toolbar = QHBoxLayout()
+
+        import_btn = QPushButton("Import CSV")
+        import_btn.setToolTip("Import a CSV recording from file")
+        import_btn.clicked.connect(self._import_csv_session)
+        toolbar.addWidget(import_btn)
+
         refresh_btn = QPushButton("Refresh")
         refresh_btn.setToolTip("Reload the session list from disk")
         refresh_btn.clicked.connect(self._refresh_session_list)
         toolbar.addWidget(refresh_btn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setStyleSheet(f"color: {COLORS['border']};")
+        toolbar.addWidget(sep)
 
         self._substance_filter = QComboBox()
         self._substance_filter.addItem("All substances")
@@ -356,10 +387,15 @@ class OsmographMainWindow(QMainWindow):
         toolbar.addWidget(QLabel("Filter:"))
         toolbar.addWidget(self._substance_filter)
 
-        process_btn = QPushButton("Process with OpenSmell")
+        process_btn = QPushButton("Process")
         process_btn.setToolTip("Run OpenSmell analysis on the selected recording")
         process_btn.clicked.connect(self._process_selected_session)
         toolbar.addWidget(process_btn)
+
+        export_fp_btn = QPushButton("Export FP")
+        export_fp_btn.setToolTip("Export fingerprint as JSON or CSV")
+        export_fp_btn.clicked.connect(self._export_fingerprint)
+        toolbar.addWidget(export_fp_btn)
 
         delete_btn = QPushButton("Delete")
         delete_btn.setToolTip("Delete the selected recording permanently")
@@ -370,8 +406,32 @@ class OsmographMainWindow(QMainWindow):
         layout.addLayout(toolbar)
 
         self._session_list = QListWidget()
+        self._session_list.setAlternatingRowColors(True)
         layout.addWidget(self._session_list)
 
+        return w
+
+    def _build_system_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._sys_tabs = QTabWidget()
+        self._sys_tabs.setDocumentMode(True)
+        self._sys_tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; }"
+        )
+
+        self._settings_tab = self._build_settings_tab()
+        self._sys_tabs.addTab(self._settings_tab, "Settings")
+
+        self._burnin_tab = self._build_burnin_tab()
+        self._sys_tabs.addTab(self._burnin_tab, "Burn-In")
+
+        self._plugin_tab = self._build_plugin_tab()
+        self._sys_tabs.addTab(self._plugin_tab, "Plugins")
+
+        layout.addWidget(self._sys_tabs)
         return w
 
     def _build_adapter_tab(self) -> QWidget:
@@ -623,6 +683,8 @@ class OsmographMainWindow(QMainWindow):
         self._burnin.completed.connect(self._on_burnin_complete)
 
         self._tabs.currentChanged.connect(self._on_tab_changed)
+        if hasattr(self, '_rec_tabs'):
+            self._rec_tabs.currentChanged.connect(self._on_rec_sub_tab_changed)
 
     def _restore_geometry(self):
         geom = self._settings.value("ui/geometry")
@@ -735,7 +797,12 @@ class OsmographMainWindow(QMainWindow):
     def _open_training_wizard(self):
         self._train_tab.set_sensor_count(self._classifier.n_sensors)
         self._train_tab.set_recordings(self._session_manager.get_records())
-        self._tabs.setCurrentWidget(self._train_tab)
+        self._tabs.setCurrentWidget(self._recordings_tab)
+        self._rec_tabs.setCurrentWidget(self._train_tab)
+
+    def _open_adapter_wizard(self):
+        self._tabs.setCurrentWidget(self._recordings_tab)
+        self._rec_tabs.setCurrentWidget(self._adapter_tab)
 
     def _on_train_complete(self, model_path: str):
         self._scan_classifiers()
@@ -931,6 +998,35 @@ class OsmographMainWindow(QMainWindow):
         self._wifi_reader.stop_streaming()
         self._wifi_reader.disconnect()
 
+    def _toggle_demo(self, checked: bool) -> None:
+        if checked:
+            self._demo_btn.setText("Stop Demo")
+            self._demo_btn.setStyleSheet(
+                f"background-color: {COLORS['warning']}; color: #000; font-weight: bold;"
+            )
+            self._demo_timer.start(200)
+            self._connected = True
+            self.dashboard.set_connected(True)
+            self.dashboard.start_timers()
+            self._status.showMessage("Demo mode active — generating synthetic sensor data", 3000)
+        else:
+            self._demo_timer.stop()
+            self._demo_btn.setText("Demo")
+            self._demo_btn.setStyleSheet("")
+            self._connected = False
+            self.dashboard.set_connected(False)
+            self._status.showMessage("Demo mode stopped", 3000)
+
+    def _generate_demo_sample(self) -> None:
+        t = time.time()
+        noise = np.random.normal(0, 0.02, 6).astype(np.float32)
+        signals = np.array([
+            0.5 + 0.3 * np.sin(t * 0.3 + i * 1.2) + 0.1 * np.sin(t * 0.7 + i * 0.8)
+            for i in range(6)
+        ], dtype=np.float32)
+        sample = signals + noise
+        self._on_data_received(sample)
+
     def _toggle_connection(self):
         if self._connected:
             self._disconnect_device()
@@ -962,8 +1058,16 @@ class OsmographMainWindow(QMainWindow):
         pass
 
     def _on_tab_changed(self, index: int):
-        if self._tabs.widget(index) is self._train_tab:
+        widget = self._tabs.widget(index)
+        if widget is self._recordings_tab:
+            self._on_rec_sub_tab_changed(self._rec_tabs.currentIndex())
+
+    def _on_rec_sub_tab_changed(self, index: int):
+        sub = self._rec_tabs.currentWidget()
+        if sub is self._train_tab:
             self._train_tab.set_recordings(self._session_manager.get_records())
+        elif sub is self._adapter_tab:
+            self._refresh_session_list()
 
     def _on_data_received(self, sample: np.ndarray):
         self.dashboard.add_sample(sample)
@@ -1073,6 +1177,37 @@ class OsmographMainWindow(QMainWindow):
                 newest.opensmell_result = result
                 self._session_manager.add_record(newest)
 
+    def _import_csv_session(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import CSV Recording", "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            import csv
+            from datetime import datetime
+
+            with open(path) as f:
+                reader = csv.reader(f)
+                header = next(reader, [])
+                row_count = sum(1 for _ in reader)
+
+            rec = SessionRecord(
+                substance="imported",
+                csv_path=path,
+                timestamp=time.time(),
+                duration_sec=row_count / 2.0,
+                sensor_count=6,
+                preset_name=self._active_preset or "Default",
+                label="imported",
+            )
+            self._session_manager.add_record(rec)
+            self._refresh_session_list()
+            self._status.showMessage(f"Imported: {Path(path).name}", 5000)
+        except Exception as e:
+            InfoDialog("Import Failed", str(e)).exec()
+
     def _process_selected_session(self):
         item = self._session_list.currentItem()
         if not item:
@@ -1106,11 +1241,6 @@ class OsmographMainWindow(QMainWindow):
                 feat_dict = dict(zip(feat_names, features))
                 label = getattr(result, "substance", "")
                 self.dashboard.update_fingerprint(feat_dict, label)
-                amplitudes = np.array([
-                    feat_dict.get(f"ch{i}_da_relative_amplitude", 0)
-                    for i in range(6)
-                ])
-                self.dashboard.update_amplitudes(amplitudes)
 
             substance = getattr(result, "substance", "Unknown")
             confidence = getattr(result, "confidence", 0.0)
@@ -1271,6 +1401,9 @@ class OsmographMainWindow(QMainWindow):
         self._adapter_wizard.train()
 
     def _on_burnin_tick(self, elapsed: int):
+        if self._burnin.is_paused:
+            self._burnin_status.setText("Burn-in: PAUSED")
+            return
         remaining = self._burnin.remaining_seconds
         h, rem = divmod(remaining, 3600)
         m, s = divmod(rem, 60)
@@ -1285,12 +1418,17 @@ class OsmographMainWindow(QMainWindow):
         self._status.showMessage("Burn-in complete! Sensors are ready.", 10000)
         self._burnin_status.setText("Burn-in: COMPLETE")
         self._burnin_status.setStyleSheet(f"color: {COLORS['accent_green']}; font-size: 24px; font-weight: bold;")
+        self._burnin_start_btn.setText("Completed")
 
     def _toggle_burnin(self):
-        if self._burnin.is_running:
-            self._burnin.stop()
-            self._burnin_start_btn.setText("Start Burn-In")
+        if self._burnin.is_running and not self._burnin.is_paused:
+            self._burnin.pause()
+            self._burnin_start_btn.setText("Resume")
             self._status.showMessage("Burn-in paused", 3000)
+        elif self._burnin.is_paused:
+            self._burnin.resume()
+            self._burnin_start_btn.setText("Stop Burn-In")
+            self._status.showMessage("Burn-in resumed", 3000)
         else:
             self._start_burnin()
 
@@ -1368,7 +1506,6 @@ class OsmographMainWindow(QMainWindow):
 
     def _toggle_theme(self) -> None:
         new_mode = self._theme_manager.toggle()
-        self.setStyleSheet(generate_stylesheet())
         label = "HUD (Dark)" if new_mode == "dark" else "Clean (Light)"
         self._status.showMessage(f"Theme: {label}", 3000)
 
@@ -1381,6 +1518,11 @@ class OsmographMainWindow(QMainWindow):
 
     def _on_theme_changed(self) -> None:
         self.setStyleSheet(generate_stylesheet())
+        self._toolbar.setStyleSheet(f"background-color: {COLORS['bg_secondary']}; border-radius: 4px;")
+        self._status.setStyleSheet(f"background-color: {COLORS['bg_secondary']}; color: {COLORS['text_dim']};")
+        self._board_label.setStyleSheet(f"color: {COLORS['accent_orange']}; padding: 0 8px;")
+        self._serial_label.setStyleSheet(f"color: {COLORS['text_dim']}; padding: 0 8px;")
+        self._recording_bar.setStyleSheet(f"background-color: {COLORS['bg_secondary']}; border-radius: 6px;")
         self.dashboard.update_theme()
 
     def _show_about(self):

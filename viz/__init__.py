@@ -1,11 +1,12 @@
 from .traces import LiveTracesWidget
-from .chemprint import SensorAmplitudeWidget
 from .fingerprint import RadarFingerprintWidget
 from .signal_quality import SignalQualityIndicator
 from .substance import SubstanceDisplay
 from .dashboard import DashboardWidget
+from .device_health import DeviceHealthWidget
 
 __all__ = [
-    "LiveTracesWidget", "SensorAmplitudeWidget", "RadarFingerprintWidget",
+    "LiveTracesWidget", "RadarFingerprintWidget",
     "SignalQualityIndicator", "SubstanceDisplay", "DashboardWidget",
+    "DeviceHealthWidget",
 ]
