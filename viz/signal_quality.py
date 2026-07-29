@@ -3,6 +3,8 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen
 
+from Osmograph.ui.theme import COLORS as C
+
 
 class SignalLevel(Enum):
     WARMING_UP = "Warming Up"
@@ -14,11 +16,11 @@ class SignalLevel(Enum):
     @property
     def color(self) -> str:
         return {
-            SignalLevel.WARMING_UP: "#ff4444",
-            SignalLevel.UNSTABLE: "#ffaa00",
-            SignalLevel.STABLE: "#88ff00",
-            SignalLevel.READY: "#00ff88",
-            SignalLevel.RECORDING: "#ff00ff",
+            SignalLevel.WARMING_UP: C["error"],
+            SignalLevel.UNSTABLE: C["warning"],
+            SignalLevel.STABLE: C["success"],
+            SignalLevel.READY: C["accent"],
+            SignalLevel.RECORDING: C["accent_hover"],
         }[self]
 
     @property
@@ -60,7 +62,7 @@ class SignalQualityIndicator(QWidget):
         layout.setContentsMargins(8, 4, 8, 4)
 
         header = QLabel("Signal Quality")
-        header.setStyleSheet("color: #aaaaaa; font-size: 10px; font-weight: bold;")
+        header.setStyleSheet(f"color: {C['text_muted']}; font-size: 10px; font-weight: 600;")
         layout.addWidget(header)
 
         indicator_layout = QHBoxLayout()
@@ -81,7 +83,8 @@ class SignalQualityIndicator(QWidget):
         self._skip_btn = QPushButton("Skip Warm-up")
         self._skip_btn.setFixedHeight(20)
         self._skip_btn.setStyleSheet(
-            "font-size: 9px; padding: 0 8px; background: #555; color: #ccc; border-radius: 3px;"
+            f"font-size: 9px; padding: 0 8px; background: {C['bg_tertiary']}; "
+            f"color: {C['text_secondary']}; border: 1px solid {C['border']}; border-radius: 4px;"
         )
         self._skip_btn.clicked.connect(self._skip_warmup)
         layout.addWidget(self._skip_btn)
@@ -150,3 +153,7 @@ class SignalQualityIndicator(QWidget):
         self._warmup_seconds = 0
         self._stable_count = 0
         self.set_level(SignalLevel.WARMING_UP)
+
+    def update_theme(self) -> None:
+        from Osmograph.ui.theme import COLORS as C
+        self._detail_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 9px;")

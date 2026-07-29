@@ -13,9 +13,9 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QComboBox, QTabWidget, QGroupBox,
     QSpinBox, QDoubleSpinBox, QLineEdit, QMessageBox, QFileDialog,
     QStatusBar, QMenuBar, QMenu, QSystemTrayIcon, QStyle, QFrame,
-    QProgressBar,
+    QProgressBar, QSizePolicy,
 )
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QPixmap
 
 from Osmograph import __version__, __app_name__
 from Osmograph.settings import get_settings, migrate_settings
@@ -30,10 +30,11 @@ from Osmograph.substance_library import SubstanceLibrary
 from Osmograph.burnin import BurnInTracker
 from Osmograph.wizard import AdapterWizard
 from Osmograph.plugins import PluginLoader
-from Osmograph.ui.theme import DARK_STYLESHEET, COLORS
+from Osmograph.ui.theme import COLORS, generate_stylesheet, get_manager as get_theme_manager
+from Osmograph.ui.theme import THEME_MODES
 from Osmograph.ui.dialogs import (
     InfoDialog, ConfirmDialog, ProgressDialog,
-    PresetSelectionDialog, PinMappingDialog,
+    PresetSelectionDialog, PinMappingDialog, AboutDialog,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,10 @@ class OsmographMainWindow(QMainWindow):
         self.setWindowTitle(f"{__app_name__} v{__version__}")
         self.resize(1100, 680)
         self.setMinimumSize(900, 600)
-        self.setStyleSheet(DARK_STYLESHEET)
+        self.setStyleSheet(generate_stylesheet())
+
+        self._theme_manager = get_theme_manager()
+        self._theme_manager.theme_changed.connect(self._on_theme_changed)
 
         self._settings = get_settings()
         migrate_settings()
@@ -130,25 +134,25 @@ class OsmographMainWindow(QMainWindow):
 
         self._recording_bar = QWidget()
         self._recording_bar.setStyleSheet(
-            f"background-color: {COLORS['bg_med']}; border-radius: 4px;"
+            f"background-color: {COLORS['bg_secondary']}; border-radius: 6px;"
         )
         rec_layout = QHBoxLayout(self._recording_bar)
         rec_layout.setContentsMargins(8, 4, 8, 4)
         self._recording_label = QLabel("")
         self._recording_label.setStyleSheet(
-            f"color: {COLORS['accent_red']}; font-weight: bold; font-size: 11px;"
+            f"color: {COLORS['error']}; font-weight: 600; font-size: 11px;"
         )
         rec_layout.addWidget(self._recording_label)
         self._recording_countdown = QLabel("")
         self._recording_countdown.setStyleSheet(
-            f"color: {COLORS['text_dim']}; font-size: 11px;"
+            f"color: {COLORS['text_secondary']}; font-size: 11px;"
         )
         rec_layout.addWidget(self._recording_countdown)
         rec_layout.addStretch()
         self._cancel_rec_btn = QPushButton("Cancel")
         self._cancel_rec_btn.setStyleSheet(
-            f"background-color: {COLORS['accent_red']}; color: white; "
-            f"font-weight: bold; font-size: 10px; padding: 2px 12px; border-radius: 3px;"
+            f"background-color: {COLORS['error']}; color: white; "
+            f"font-weight: 600; font-size: 10px; padding: 2px 12px; border-radius: 4px; border: none;"
         )
         self._cancel_rec_btn.clicked.connect(self._cancel_recording)
         rec_layout.addWidget(self._cancel_rec_btn)
@@ -167,6 +171,11 @@ class OsmographMainWindow(QMainWindow):
         export_action = QAction("&Export Sessions...", self)
         export_action.triggered.connect(self._export_sessions)
         file_menu.addAction(export_action)
+
+        export_fp_action = QAction("Export &Fingerprint...", self)
+        export_fp_action.setShortcut("Ctrl+E")
+        export_fp_action.triggered.connect(self._export_fingerprint)
+        file_menu.addAction(export_fp_action)
 
         file_menu.addSeparator()
         quit_action = QAction("&Quit", self)
@@ -214,6 +223,14 @@ class OsmographMainWindow(QMainWindow):
         toggle_fullscreen.setShortcut("F11")
         toggle_fullscreen.triggered.connect(lambda: self.showFullScreen() if not self.isFullScreen() else self.showNormal())
         view_menu.addAction(toggle_fullscreen)
+
+        view_menu.addSeparator()
+        toggle_theme = QAction("Toggle Theme", self)
+        toggle_theme.setShortcut("Ctrl+T")
+        mode_label = "Light" if self._theme_manager.is_dark() else "Dark"
+        toggle_theme.setText(f"Switch to {mode_label} Theme")
+        toggle_theme.triggered.connect(self._toggle_theme)
+        view_menu.addAction(toggle_theme)
 
         help_menu = menubar.addMenu("&Help")
         about_action = QAction("&About Osmograph", self)
@@ -362,7 +379,7 @@ class OsmographMainWindow(QMainWindow):
         layout = QVBoxLayout(w)
 
         header = QLabel("Adapter Training Wizard")
-        header.setStyleSheet(f"color: {COLORS['accent_cyan']}; font-size: 18px; font-weight: bold;")
+        header.setStyleSheet(f"color: {COLORS['accent']}; font-size: 18px; font-weight: 700;")
         layout.addWidget(header)
 
         desc = QLabel(
@@ -370,7 +387,7 @@ class OsmographMainWindow(QMainWindow):
             "Osmograph will learn to distinguish your specific samples."
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {COLORS['text_dim']}; padding: 4px;")
+        desc.setStyleSheet(f"color: {COLORS['text_secondary']}; padding: 4px;")
         layout.addWidget(desc)
 
         from PySide6.QtWidgets import QListWidget, QListWidgetItem
@@ -1078,13 +1095,30 @@ class OsmographMainWindow(QMainWindow):
             sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "opensmell"))
             import opensmell
             result = opensmell.process(csv_path)
-            self.dashboard.update_prediction(result.substance, result.confidence, result.warning or "")
-            self.dashboard.update_chemprint(result.chemoprint)
-            self._status.showMessage(f"OpenSmell: {result.substance} (conf={result.confidence:.3f})", 5000)
+
+            chemprint = getattr(result, "chemoprint", None)
+            if chemprint is not None:
+                self.dashboard.update_chemprint(chemprint)
+
+            features = getattr(result, "features", None)
+            feat_names = getattr(result, "feature_names", None)
+            if features is not None and feat_names is not None:
+                feat_dict = dict(zip(feat_names, features))
+                label = getattr(result, "substance", "")
+                self.dashboard.update_fingerprint(feat_dict, label)
+
+            substance = getattr(result, "substance", "Unknown")
+            confidence = getattr(result, "confidence", 0.0)
+            warning = getattr(result, "warning", "")
+
+            self.dashboard.update_prediction(substance, confidence, warning or "")
+            self._status.showMessage(
+                f"OpenSmell: {substance} (conf={confidence:.3f})", 5000
+            )
             return {
-                "substance": result.substance,
-                "confidence": result.confidence,
-                "warning": result.warning,
+                "substance": substance,
+                "confidence": confidence,
+                "warning": warning,
             }
         except ImportError:
             return None
@@ -1101,6 +1135,63 @@ class OsmographMainWindow(QMainWindow):
         if confirm.exec():
             self._session_manager.remove_record(file_id)
             self._refresh_session_list()
+
+    def _export_fingerprint(self) -> None:
+        item = self._session_list.currentItem()
+        if not item:
+            InfoDialog("No Selection", "Select a session recording first.").exec()
+            return
+        file_id = item.data(Qt.UserRole)
+        records = self._session_manager.get_records()
+        target = next((r for r in records if r.file_id == file_id), None)
+        if not target or not Path(target.csv_path).exists():
+            InfoDialog("File Not Found", "The recording file could not be found.").exec()
+            return
+
+        try:
+            import opensmell
+            from opensmell import features as _f
+            import json, csv
+            from datetime import datetime
+
+            raw = opensmell.load_recording(target.csv_path)
+            feat_dict = _f.extract_all_framework_features(raw)
+            metadata = {
+                "app": __app_name__,
+                "version": __version__,
+                "timestamp": datetime.fromtimestamp(target.timestamp).isoformat(),
+                "substance": target.substance,
+                "duration_sec": target.duration_sec,
+                "preset": target.preset_name,
+                "sensor_count": target.sensor_count,
+                "n_features": len(feat_dict),
+            }
+
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export Fingerprint",
+                f"fingerprint_{target.substance}_{target.file_id}",
+                "JSON (*.json);;CSV (*.csv)",
+            )
+            if not path:
+                return
+
+            if path.endswith(".csv"):
+                with open(path, "w", newline="") as f:
+                    w = csv.writer(f)
+                    w.writerow(["feature", "value"])
+                    for k in sorted(feat_dict.keys()):
+                        w.writerow([k, feat_dict[k]])
+            else:
+                export = {"metadata": metadata, "features": {}}
+                for k in sorted(feat_dict.keys()):
+                    v = feat_dict[k]
+                    export["features"][k] = float(v) if isinstance(v, (np.floating, float)) else int(v) if isinstance(v, (np.integer, int)) else v
+                with open(path, "w") as f:
+                    json.dump(export, f, indent=2)
+
+            self._status.showMessage(f"Fingerprint exported: {path}", 5000)
+        except Exception as e:
+            InfoDialog("Export Failed", str(e)).exec()
 
     def _export_sessions(self):
         path = QFileDialog.getExistingDirectory(self, "Export Sessions To")
@@ -1260,14 +1351,29 @@ class OsmographMainWindow(QMainWindow):
             except FileNotFoundError:
                 subprocess.run(["explorer", str(plugin_dir)], check=False)
 
+    def _toggle_theme(self) -> None:
+        new_mode = self._theme_manager.toggle()
+        self.setStyleSheet(generate_stylesheet())
+        label = "HUD (Dark)" if new_mode == "dark" else "Clean (Light)"
+        self._status.showMessage(f"Theme: {label}", 3000)
+
+        for action in self.menuBar().actions():
+            if action.text() == "&View":
+                for a in action.menu().actions():
+                    if "Switch to" in a.text():
+                        mode_label = "Light" if self._theme_manager.is_dark() else "Dark"
+                        a.setText(f"Switch to {mode_label} Theme")
+
+    def _on_theme_changed(self) -> None:
+        self.setStyleSheet(generate_stylesheet())
+        self.dashboard.update_theme()
+
     def _show_about(self):
-        InfoDialog(
+        from Osmograph.ui.theme import COLORS as C
+        logo_path = Path(__file__).resolve().parent.parent / "opensmell_logo.png"
+        AboutDialog(
             f"About {__app_name__}",
-            f"<h2>{__app_name__} v{__version__}</h2>"
-            "<p>Electronic nose GUI for the OpenSmell project.</p>"
-            "<p>Manages ESP32-based MQ sensor arrays, records sessions, "
-            "trains adapters, and integrates with the OpenSmell SDK.</p>"
-            "<p>Part of the OpenSmell ecosystem.</p>"
+            logo_path if logo_path.exists() else None,
         ).exec()
 
     def closeEvent(self, event):

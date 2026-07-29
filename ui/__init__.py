@@ -1,14 +1,15 @@
-from .theme import DARK_STYLESHEET, COLORS
+from .theme import COLORS, generate_stylesheet, get_manager, THEME_MODES
 from .dialogs import (
     InfoDialog,
     ConfirmDialog,
     ProgressDialog,
     PresetSelectionDialog,
     PinMappingDialog,
+    AboutDialog,
 )
 
 __all__ = [
-    "DARK_STYLESHEET", "COLORS",
+    "COLORS", "generate_stylesheet", "get_manager", "THEME_MODES",
     "InfoDialog", "ConfirmDialog", "ProgressDialog",
-    "PresetSelectionDialog", "PinMappingDialog",
+    "PresetSelectionDialog", "PinMappingDialog", "AboutDialog",
 ]

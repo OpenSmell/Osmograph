@@ -105,6 +105,9 @@ class CompetitionGrid(QWidget):
         self._unknown = False
         self.update()
 
+    def update_theme(self) -> None:
+        self.update()
+
     def _animate(self) -> None:
         if not self._classes:
             return

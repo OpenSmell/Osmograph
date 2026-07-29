@@ -65,17 +65,16 @@ class SubstanceDisplay(QWidget):
         self._progress_bar.setValue(0)
         self._progress_bar.setTextVisible(False)
         self._progress_bar.setFixedHeight(8)
-        self._progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #222;
+        self._progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {COLORS['bg_tertiary']};
                 border: none;
                 border-radius: 4px;
-            }
-            QProgressBar::chunk {
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #ff4444, stop:0.5 #ffaa00, stop:1 #00ff88);
+            }}
+            QProgressBar::chunk {{
+                background-color: {COLORS['accent']};
                 border-radius: 4px;
-            }
+            }}
         """)
         layout.addWidget(self._progress_bar)
 
@@ -169,3 +168,7 @@ class SubstanceDisplay(QWidget):
         self._last_substance = ""
         self._locked = False
         self.setStyleSheet("")
+
+    def update_theme(self) -> None:
+        from Osmograph.ui.theme import COLORS as C
+        self._warning_label.setStyleSheet(f"color: {C['warning']}; font-size: 9px;")

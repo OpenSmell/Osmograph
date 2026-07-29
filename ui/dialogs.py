@@ -6,8 +6,9 @@ from PySide6.QtWidgets import (
     QComboBox, QMessageBox, QProgressBar, QDialogButtonBox,
     QListWidget, QListWidgetItem, QWidget, QApplication,
 )
+from PySide6.QtGui import QPixmap
 
-from Osmograph.ui.theme import COLORS, DARK_STYLESHEET
+from Osmograph.ui.theme import COLORS, generate_stylesheet, get_manager as get_theme_manager
 
 
 class InfoDialog(QDialog):
@@ -200,3 +201,82 @@ class PinMappingDialog(QDialog):
     @property
     def assignments(self) -> dict[str, int]:
         return self._assignments
+
+
+class AboutDialog(QDialog):
+    def __init__(self, title: str, logo_path: Optional[str] = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedSize(420, 380)
+        self.setStyleSheet(generate_stylesheet())
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 32, 32, 24)
+        layout.setSpacing(12)
+
+        if logo_path:
+            logo = QLabel()
+            pix = QPixmap(logo_path)
+            scaled = pix.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo.setPixmap(scaled)
+            logo.setAlignment(Qt.AlignCenter)
+            layout.addWidget(logo)
+
+        name = QLabel("Osmograph")
+        name.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 24px; font-weight: 700; letter-spacing: 1px;"
+        )
+        name.setAlignment(Qt.AlignCenter)
+        layout.addWidget(name)
+
+        version = QLabel(f"v{__import__('Osmograph').__version__}")
+        version.setStyleSheet(
+            f"color: {COLORS['text_muted']}; font-size: 12px; font-weight: 400;"
+        )
+        version.setAlignment(Qt.AlignCenter)
+        layout.addWidget(version)
+
+        tagline = QLabel(
+            "Universal Molecular Fingerprinting Engine"
+        )
+        tagline.setWordWrap(True)
+        tagline.setAlignment(Qt.AlignCenter)
+        tagline.setStyleSheet(
+            f"color: {COLORS['accent']}; font-size: 13px; font-weight: 500; padding: 4px 0;"
+        )
+        layout.addWidget(tagline)
+
+        sep = QLabel("")
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background-color: {COLORS['border']};")
+        layout.addWidget(sep)
+
+        desc = QLabel(
+            "Desktop application for MOX sensor arrays.\n"
+            "Record sessions, extract 187-dim framework fingerprints,\n"
+            "train classifiers, and identify substances in real time."
+        )
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px; line-height: 1.5;")
+        layout.addWidget(desc)
+
+        layout.addStretch()
+
+        links = QLabel(
+            '<a href="https://github.com/opensmell" '
+            f'style="color: {COLORS["accent"]}; text-decoration: none;">'
+            "github.com/opensmell</a>"
+        )
+        links.setAlignment(Qt.AlignCenter)
+        links.setOpenExternalLinks(True)
+        links.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        layout.addWidget(links)
+
+        btn = QPushButton("Close")
+        btn.setStyleSheet(
+            f"background-color: {COLORS['accent']}; color: {COLORS['accent_text']}; "
+            f"font-weight: 600; border: none; border-radius: 6px; padding: 8px 24px;"
+        )
+        btn.clicked.connect(self.accept)
+        layout.addWidget(btn, alignment=Qt.AlignCenter)

@@ -112,3 +112,9 @@ class LiveTracesWidget(QWidget):
 
     def set_info(self, text: str) -> None:
         self._info_label.setText(text)
+
+    def update_theme(self) -> None:
+        self.plot_widget.setBackground(COLORS["bg_primary"])
+        self.plot_widget.getAxis("left").setTextPen(COLORS["text_secondary"])
+        self.plot_widget.getAxis("bottom").setTextPen(COLORS["text_secondary"])
+        self._info_label.setStyleSheet(f"color: {COLORS['text_muted']}; padding: 4px;")

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont
 
 from Osmograph.viz.realtime_classifier import extract_features
+from Osmograph.ui.theme import COLORS as C
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +245,7 @@ class TrainTab(QWidget):
         layout.setContentsMargins(12, 8, 12, 8)
 
         header = QLabel("Train a Classifier")
-        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #88ccff;")
+        header.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {C['accent']};")
         layout.addWidget(header)
 
         desc = QLabel(
@@ -252,7 +253,7 @@ class TrainTab(QWidget):
             "The classifier will be auto-loaded for real-time predictions."
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #999; padding: 2px 0 8px 0;")
+        desc.setStyleSheet(f"color: {C['text_muted']}; padding: 2px 0 8px 0;")
         layout.addWidget(desc)
 
         config_group = QGroupBox("Classifier Configuration")
@@ -266,7 +267,7 @@ class TrainTab(QWidget):
 
         config_layout.addWidget(QLabel("Sensors:"))
         self._sensor_count_label = QLabel(str(self._n_sensors))
-        self._sensor_count_label.setStyleSheet("font-weight: bold; color: #ccc;")
+        self._sensor_count_label.setStyleSheet(f"font-weight: 600; color: {C['text_primary']};")
         config_layout.addWidget(self._sensor_count_label)
 
         config_layout.addWidget(QLabel("Window:"))
@@ -283,7 +284,7 @@ class TrainTab(QWidget):
         rec_layout = QVBoxLayout(recordings_group)
 
         self._rec_count_label = QLabel("")
-        self._rec_count_label.setStyleSheet("color: #888; font-size: 10px; padding: 2px 0;")
+        self._rec_count_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 10px; padding: 2px 0;")
         rec_layout.addWidget(self._rec_count_label)
 
         self._search_input = QLineEdit()
@@ -309,7 +310,7 @@ class TrainTab(QWidget):
 
         self._warning_label = QLabel("")
         self._warning_label.setWordWrap(True)
-        self._warning_label.setStyleSheet("color: #ff8844; padding: 4px; font-weight: bold;")
+        self._warning_label.setStyleSheet(f"color: {C['warning']}; padding: 4px; font-weight: 600;")
         self._warning_label.setVisible(False)
         layout.addWidget(self._warning_label)
 
@@ -320,8 +321,8 @@ class TrainTab(QWidget):
         train_layout = QHBoxLayout()
         self._train_btn = QPushButton("Train Classifier")
         self._train_btn.setStyleSheet(
-            "background-color: #44bb77; color: black; font-weight: bold; "
-            "padding: 8px 24px; border-radius: 4px; font-size: 14px;"
+            f"background-color: {C['success']}; color: #000; font-weight: 600; "
+            f"border: none; padding: 8px 24px; border-radius: 6px; font-size: 14px;"
         )
         self._train_btn.clicked.connect(self._on_train)
         self._train_btn.setEnabled(False)
@@ -329,7 +330,7 @@ class TrainTab(QWidget):
 
         self._status_label = QLabel("")
         self._status_label.setWordWrap(True)
-        self._status_label.setStyleSheet("color: #aaa; padding: 4px;")
+        self._status_label.setStyleSheet(f"color: {C['text_muted']}; padding: 4px;")
         train_layout.addWidget(self._status_label, 1)
         layout.addLayout(train_layout)
 
@@ -522,8 +523,8 @@ class TrainTab(QWidget):
                 f"✓ {result['name']} — {', '.join(result['classes'])} "
                 f"({acc:.1%}, {result['n_windows']} windows)"
             )
-            self._status_label.setStyleSheet("color: #88dd88; padding: 4px;")
+            self._status_label.setStyleSheet(f"color: {C['success']}; padding: 4px;")
             self.training_complete.emit(result["path"])
         else:
             self._status_label.setText(f"✗ {result.get('error', 'Training failed')}")
-            self._status_label.setStyleSheet("color: #ff6666; padding: 4px;")
+            self._status_label.setStyleSheet(f"color: {C['error']}; padding: 4px;")

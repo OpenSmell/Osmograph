@@ -95,3 +95,9 @@ class ChemprintBarWidget(QWidget):
     @property
     def chemprint(self) -> np.ndarray:
         return self._chemprint
+
+    def update_theme(self) -> None:
+        self.plot_widget.setBackground(COLORS["bg_primary"])
+        self.plot_widget.getAxis("left").setTextPen(COLORS["text_secondary"])
+        self.plot_widget.getAxis("bottom").setTextPen(COLORS["text_secondary"])
+        self._legend_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 9px; padding: 2px;")

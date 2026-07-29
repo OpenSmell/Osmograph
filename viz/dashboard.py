@@ -8,6 +8,7 @@ import numpy as np
 
 from Osmograph.viz.traces import LiveTracesWidget
 from Osmograph.viz.chemprint import ChemprintBarWidget
+from Osmograph.viz.fingerprint import RadarFingerprintWidget
 from Osmograph.viz.signal_quality import SignalQualityIndicator
 from Osmograph.viz.substance import SubstanceDisplay
 from Osmograph.viz.competition_grid import CompetitionGrid
@@ -62,8 +63,14 @@ class DashboardWidget(QWidget):
         self.traces.set_sensor_count(sensor_count)
         left_layout.addWidget(self.traces)
 
+        mid_split = QSplitter(Qt.Horizontal)
         self.chemprint = ChemprintBarWidget()
-        left_layout.addWidget(self.chemprint)
+        mid_split.addWidget(self.chemprint)
+
+        self.fingerprint = RadarFingerprintWidget()
+        mid_split.addWidget(self.fingerprint)
+
+        left_layout.addWidget(mid_split)
 
         content.addWidget(left_panel)
 
@@ -103,14 +110,15 @@ class DashboardWidget(QWidget):
         layout.addWidget(content)
 
         self._hint_label = QLabel(
-            "Connect your ESP32 via USB, then click Detect Board \u2192 Connect\n"
-            "Once connected, enter a label and click Record to capture a sample"
+            "Welcome to Osmograph\n"
+            "Connect your ESP32 via USB \u2192 Detect Board \u2192 Connect\n"
+            "Or load a CSV recording from the Sessions tab"
         )
         self._hint_label.setAlignment(Qt.AlignCenter)
         self._hint_label.setStyleSheet(
-            f"color: {COLORS['text_dim']}; background: {COLORS['bg_med']}; "
-            f"border: 1px dashed {COLORS['border']}; border-radius: 6px; "
-            f"padding: 8px; font-size: 12px;"
+            f"color: {COLORS['text_secondary']}; background: {COLORS['bg_secondary']}; "
+            f"border: 1px dashed {COLORS['border']}; border-radius: 8px; "
+            f"padding: 16px; font-size: 12px; line-height: 1.6;"
         )
         layout.addWidget(self._hint_label)
 
@@ -168,6 +176,23 @@ class DashboardWidget(QWidget):
 
     def update_chemprint(self, chemprint: np.ndarray) -> None:
         self.chemprint.update_chemprint(chemprint)
+
+    def update_fingerprint(self, features: dict, label: str = "") -> None:
+        self.fingerprint.set_fingerprint(features, label)
+
+    def add_fingerprint_overlay(self, features: dict, label: str = "", color: str = "") -> None:
+        self.fingerprint.add_fingerprint(features, label, color)
+
+    def clear_fingerprint_overlay(self) -> None:
+        self.fingerprint.clear_overlay()
+
+    def update_theme(self) -> None:
+        self.traces.update_theme()
+        self.chemprint.update_theme()
+        self.fingerprint.update_theme()
+        self.signal_quality.update_theme()
+        self.substance.update_theme()
+        self.competition.update_theme()
 
     def set_sensor_count(self, count: int) -> None:
         self._sensor_count = count

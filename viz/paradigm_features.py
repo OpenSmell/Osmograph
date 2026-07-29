@@ -3,9 +3,12 @@ paradigm_features.py
 
 Feature extraction for MOX sensor time series.
 
-Two methods:
+Three methods:
   1. paradigm_features (30-dim, legacy) — simple 5-feature-per-channel extraction
-  2. framework_features (145-dim, preferred) — full paper taxonomy features
+  2. framework_features (145+ dim, preferred) — full paper taxonomy features
+     including device-agnostic, absolute, temporal, health, hardware,
+     advanced (saturation index, multi-exp decay constants),
+     cross-channel selectivity ratios, and global metrics
 
 Framework features are the recommended approach. Paradigm features are kept
 for backward compatibility with existing trained models.
@@ -47,7 +50,23 @@ def compute_window_paradigms(window: np.ndarray, r0_samples: int = 3) -> np.ndar
 
 
 def compute_framework_features(window: np.ndarray) -> np.ndarray:
-    """Extract 145-dim framework features using the opensmell SDK."""
+    """Extract framework features using the opensmell SDK.
+
+    Returns 145+ dimensional feature vector covering:
+    - Device-agnostic (6 per channel): relative_amplitude, direction,
+      rise_time, decay_time, auc, endpoint_delta
+    - Absolute (4 per channel): raw_resistance, baseline_resistance,
+      voltage, calibrated_concentration
+    - Temporal (4 per channel): hf_transient, oscillation_freq,
+      oscillation_amp, response_latency
+    - Health (4 per channel): drift_rate, sensitivity_decay,
+      noise_floor, hysteresis
+    - Hardware (3 per channel): circuit_response, thermal_profile, adc_noise
+    - Advanced (7 per channel): saturation_index, tau1, tau2, tau3,
+      a1, a2, a3 (multi-exp decay constants)
+    - Cross-channel: selectivity_ratios for all sensor pairs
+    - Global: max/mean_delta_ratio, n_active_channels, total_auc
+    """
     from opensmell import features as _f
     feat_dict = _f.extract_all_framework_features(window)
     keys = sorted(feat_dict.keys())
