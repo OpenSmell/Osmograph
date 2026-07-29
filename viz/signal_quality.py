@@ -1,13 +1,13 @@
 from enum import Enum
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen
 
 from Osmograph.ui.theme import COLORS as C
 
 
 class SignalLevel(Enum):
-    WARMING_UP = "Warming Up"
+    WARMING_UP = "Warm up"
     UNSTABLE = "Unstable"
     STABLE = "Stable"
     READY = "Ready"
@@ -28,25 +28,23 @@ class SignalLevel(Enum):
         return QColor(self.color)
 
 
-class _TrafficLight(QWidget):
+class _QualityDot(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._level = SignalLevel.WARMING_UP
-        self.setFixedSize(24, 24)
+        self._color = QColor(C["error"])
+        self.setFixedSize(10, 10)
 
-    def set_level(self, level: SignalLevel) -> None:
-        self._level = level
+    def set_color(self, color: str):
+        self._color = QColor(color)
         self.update()
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        color = self._level.color_hex
-        painter.setBrush(QBrush(color))
-        painter.setPen(QPen(color.darker(150), 2))
-        rect = self.rect().adjusted(2, 2, -2, -2)
-        painter.drawEllipse(rect)
-        painter.end()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setBrush(QBrush(self._color))
+        p.setPen(QPen(self._color.darker(130), 1))
+        p.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
+        p.end()
 
 
 class SignalQualityIndicator(QWidget):
@@ -58,36 +56,25 @@ class SignalQualityIndicator(QWidget):
         self._noise_level = 1.0
         self._stable_count = 0
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(6)
 
-        header = QLabel("Signal Quality")
-        header.setStyleSheet(f"color: {C['text_muted']}; font-size: 10px; font-weight: 600;")
-        layout.addWidget(header)
-
-        indicator_layout = QHBoxLayout()
-
-        self._light = _TrafficLight()
-        indicator_layout.addWidget(self._light)
+        self._dot = _QualityDot()
+        self._dot.set_color(self._level.color)
+        layout.addWidget(self._dot)
 
         self._status_label = QLabel(self._level.value)
-        self._status_label.setStyleSheet(f"color: {self._level.color}; font-size: 14px; font-weight: bold;")
-        indicator_layout.addWidget(self._status_label)
-        indicator_layout.addStretch()
-        layout.addLayout(indicator_layout)
+        self._status_label.setStyleSheet(
+            f"color: {self._level.color}; font-size: 11px; font-weight: 600;"
+        )
+        layout.addWidget(self._status_label)
 
         self._detail_label = QLabel("")
-        self._detail_label.setStyleSheet("color: #666666; font-size: 9px;")
+        self._detail_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 9px;")
         layout.addWidget(self._detail_label)
 
-        self._skip_btn = QPushButton("Skip Warm-up")
-        self._skip_btn.setFixedHeight(20)
-        self._skip_btn.setStyleSheet(
-            f"font-size: 9px; padding: 0 8px; background: {C['bg_tertiary']}; "
-            f"color: {C['text_secondary']}; border: 1px solid {C['border']}; border-radius: 4px;"
-        )
-        self._skip_btn.clicked.connect(self._skip_warmup)
-        layout.addWidget(self._skip_btn)
+        layout.addStretch()
 
         self.setToolTip("Shows sensor warm-up status and signal stability")
 
@@ -102,20 +89,21 @@ class SignalQualityIndicator(QWidget):
             self._warmup_seconds += 1
             elapsed = self._warmup_seconds
             mins, secs = divmod(elapsed, 60)
-            self._detail_label.setText(f"Stabilising... {mins}:{secs:02d}")
-        elif self._level == SignalLevel.READY or self._level == SignalLevel.STABLE:
-            self._detail_label.setText("Signal stable")
+            self._detail_label.setText(f"{mins}:{secs:02d}")
+        elif self._level in (SignalLevel.READY, SignalLevel.STABLE):
+            self._detail_label.setText("Stable")
 
     def set_level(self, level: SignalLevel) -> None:
         self._level = level
-        self._light.set_level(level)
+        self._dot.set_color(level.color)
         self._status_label.setText(level.value)
-        self._status_label.setStyleSheet(f"color: {level.color}; font-size: 14px; font-weight: bold;")
-        self._skip_btn.setVisible(level == SignalLevel.WARMING_UP)
+        self._status_label.setStyleSheet(
+            f"color: {level.color}; font-size: 11px; font-weight: 600;"
+        )
 
     def set_noise(self, noise: float) -> None:
         self._noise_level = noise
-        if self._level == SignalLevel.READY or self._level == SignalLevel.STABLE:
+        if self._level in (SignalLevel.READY, SignalLevel.STABLE):
             if noise > 15.0:
                 self.set_level(SignalLevel.UNSTABLE)
             elif noise > 5.0:
@@ -130,7 +118,7 @@ class SignalQualityIndicator(QWidget):
                 self._stable_count += 1
                 if self._stable_count >= 3:
                     self.set_level(SignalLevel.READY)
-                    self._detail_label.setText("Signal stable")
+                    self._detail_label.setText("Stable")
             else:
                 self._stable_count = 0
 
@@ -144,16 +132,11 @@ class SignalQualityIndicator(QWidget):
     def level(self) -> SignalLevel:
         return self._level
 
-    def _skip_warmup(self) -> None:
-        self._warmup_seconds = self._warmup_target
-        self._detail_label.setText("Warm-up skipped")
-        self.set_level(SignalLevel.READY)
-
     def reset_warmup(self) -> None:
         self._warmup_seconds = 0
         self._stable_count = 0
         self.set_level(SignalLevel.WARMING_UP)
 
     def update_theme(self) -> None:
-        from Osmograph.ui.theme import COLORS as C
         self._detail_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 9px;")
+        self._dot.set_color(self._level.color)

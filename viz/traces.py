@@ -1,6 +1,7 @@
 import numpy as np
-from PySide6.QtCore import Signal, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtCore import Signal, QTimer, Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout
+from PySide6.QtGui import QPainter, QColor, QBrush, QPen
 
 import pyqtgraph as pg
 
@@ -9,6 +10,41 @@ from Osmograph.ui.theme import COLORS
 SENSOR_NAMES = ["MQ-135", "MQ-3", "MQ-6", "MQ-7", "MQ-4", "MQ-8"]
 SENSOR_COLORS = ["#00ffff", "#ff00ff", "#adff2f", "#ff6347", "#ffd700", "#00ced1"]
 WINDOW_SIZE = 500
+
+QUALITY_COLORS = {
+    "good": "#34d399",
+    "warning": "#fbbf24",
+    "error": "#ef4444",
+    "off": "#606060",
+}
+
+
+class _QualityDots(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._qualities = ["off"] * 6
+        self.setFixedWidth(14)
+
+    def set_qualities(self, qualities: list[str]):
+        self._qualities = qualities
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        h = self.height()
+        margin = 8
+        n = len(self._qualities)
+        dot_size = 6
+        gap = (h - 2 * margin - n * dot_size) / max(n - 1, 1)
+        for i, q in enumerate(self._qualities):
+            y = int(margin + i * (dot_size + gap))
+            color_str = QUALITY_COLORS.get(q, QUALITY_COLORS["off"])
+            color = QColor(color_str)
+            p.setBrush(QBrush(color))
+            p.setPen(QPen(color.darker(140), 1))
+            p.drawEllipse(4, y, dot_size, dot_size)
+        p.end()
 
 
 class LiveTracesWidget(QWidget):
@@ -23,10 +59,14 @@ class LiveTracesWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.plot_widget = pg.PlotWidget(background=COLORS["bg_dark"])
-        self.plot_widget.setLabel("left", "Sensor Value", color=COLORS["text_dim"])
+        plot_row = QHBoxLayout()
+        plot_row.setContentsMargins(0, 0, 0, 0)
+        plot_row.setSpacing(0)
+
+        self.plot_widget = pg.PlotWidget(background=COLORS["bg_primary"])
+        self.plot_widget.setLabel("left", "Rs/R0", color=COLORS["text_dim"])
         self.plot_widget.setLabel("bottom", "Sample", color=COLORS["text_dim"])
-        self.plot_widget.showGrid(x=True, y=True, alpha=0.1)
+        self.plot_widget.showGrid(x=True, y=True, alpha=0.08)
         self.plot_widget.setMouseEnabled(x=False, y=False)
         self.plot_widget.setMenuEnabled(False)
         self.plot_widget.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
@@ -35,7 +75,7 @@ class LiveTracesWidget(QWidget):
         self.plot_widget.getAxis("bottom").setTextPen(COLORS["text_dim"])
 
         legend = self.plot_widget.addLegend(offset=(10, 10))
-        legend.setBrush(pg.mkColor(COLORS["bg_med"]))
+        legend.setBrush(pg.mkColor(COLORS["bg_secondary"]))
 
         for i in range(6):
             pen = pg.mkPen(color=SENSOR_COLORS[i], width=1.5, antialias=True)
@@ -47,17 +87,24 @@ class LiveTracesWidget(QWidget):
             )
             self._curves.append(curve)
 
+        plot_row.addWidget(self.plot_widget)
+
+        self._quality_dots = _QualityDots()
+        plot_row.addWidget(self._quality_dots)
+
+        layout.addLayout(plot_row)
+
         self._info_label = QLabel("Warming up...")
-        self._info_label.setStyleSheet(f"color: {COLORS['text_dim']}; padding: 4px;")
+        self._info_label.setStyleSheet(
+            f"color: {COLORS['text_muted']}; padding: 2px 4px; font-size: 10px;"
+        )
         layout.addWidget(self._info_label)
-        layout.addWidget(self.plot_widget)
 
         self._update_timer = QTimer(self)
         self._update_timer.timeout.connect(self._refresh_plot)
 
     def start_timers(self):
         self._update_timer.start(50)
-
         self._sample_count = 0
 
     def add_sample(self, sample: np.ndarray) -> None:
@@ -74,13 +121,12 @@ class LiveTracesWidget(QWidget):
         self._sample_count += 1
 
     def _refresh_plot(self) -> None:
-        visible = self._data[:max(self._index, 1)]
+        visible = self._data[: max(self._index, 1)]
         for i, curve in enumerate(self._curves):
             if self._index < WINDOW_SIZE:
                 curve.setData(np.arange(self._index), visible[:, i])
             else:
                 curve.setData(np.arange(WINDOW_SIZE), self._data[:, i])
-
         if self._index > 10:
             self.plot_widget.enableAutoRange(axis=pg.ViewBox.YAxis, enable=True)
 
@@ -101,7 +147,7 @@ class LiveTracesWidget(QWidget):
 
     @property
     def current_data(self) -> np.ndarray:
-        return self._data[:max(self._index, 1)].copy()
+        return self._data[: max(self._index, 1)].copy()
 
     def reset(self) -> None:
         self._data.fill(0)
@@ -109,12 +155,19 @@ class LiveTracesWidget(QWidget):
         self._sample_count = 0
         self._info_label.setText("Warming up...")
         self._info_label.setVisible(True)
+        self._quality_dots.set_qualities(["off"] * 6)
 
     def set_info(self, text: str) -> None:
         self._info_label.setText(text)
+
+    def set_sensor_quality(self, qualities: list[str]):
+        if len(qualities) == 6:
+            self._quality_dots.set_qualities(qualities)
 
     def update_theme(self) -> None:
         self.plot_widget.setBackground(COLORS["bg_primary"])
         self.plot_widget.getAxis("left").setTextPen(COLORS["text_secondary"])
         self.plot_widget.getAxis("bottom").setTextPen(COLORS["text_secondary"])
-        self._info_label.setStyleSheet(f"color: {COLORS['text_muted']}; padding: 4px;")
+        self._info_label.setStyleSheet(
+            f"color: {COLORS['text_muted']}; padding: 2px 4px; font-size: 10px;"
+        )

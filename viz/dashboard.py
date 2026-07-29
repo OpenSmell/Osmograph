@@ -7,12 +7,20 @@ from PySide6.QtWidgets import (
 import numpy as np
 
 from Osmograph.viz.traces import LiveTracesWidget
-from Osmograph.viz.chemprint import ChemprintBarWidget
+from Osmograph.viz.chemprint import SensorAmplitudeWidget
 from Osmograph.viz.fingerprint import RadarFingerprintWidget
-from Osmograph.viz.signal_quality import SignalQualityIndicator
+from Osmograph.viz.signal_quality import SignalQualityIndicator, SignalLevel
 from Osmograph.viz.substance import SubstanceDisplay
 from Osmograph.viz.competition_grid import CompetitionGrid
 from Osmograph.ui.theme import COLORS
+
+SENSOR_NAMES = ["MQ-135", "MQ-3", "MQ-6", "MQ-7", "MQ-4", "MQ-8"]
+
+QUALITY_MAP = {
+    "good": (0, 200, 80),
+    "warning": (200, 180, 0),
+    "error": (220, 50, 50),
+}
 
 
 class DashboardWidget(QWidget):
@@ -20,6 +28,7 @@ class DashboardWidget(QWidget):
         super().__init__(parent)
         self._sensor_count = sensor_count
         self._classifier = None
+        self._last_qualities = ["off"] * 6
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -27,28 +36,28 @@ class DashboardWidget(QWidget):
 
         top_bar = QHBoxLayout()
         title = QLabel("Live Dashboard")
-        title.setStyleSheet(f"color: {COLORS['text_bright']}; font-size: 16px; font-weight: bold;")
+        title.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 15px; font-weight: bold;"
+        )
         top_bar.addWidget(title)
 
         self._sample_count_label = QLabel("Samples: 0")
-        self._sample_count_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        self._sample_count_label.setStyleSheet(
+            f"color: {COLORS['text_muted']}; font-size: 10px;"
+        )
         top_bar.addWidget(self._sample_count_label)
-
-        self._data_quality = QLabel("")
-        self._data_quality.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        top_bar.addWidget(self._data_quality)
 
         top_bar.addStretch()
         self._reset_btn = QPushButton("Reset")
-        self._reset_btn.setFixedWidth(80)
+        self._reset_btn.setFixedWidth(70)
         self._reset_btn.clicked.connect(self.reset)
-        self._reset_btn.setToolTip("Clear all traces, predictions, and quality metrics")
+        self._reset_btn.setToolTip("Clear all traces and predictions")
         top_bar.addWidget(self._reset_btn)
 
         self._pause_btn = QPushButton("Pause")
-        self._pause_btn.setFixedWidth(80)
+        self._pause_btn.setFixedWidth(70)
         self._pause_btn.clicked.connect(self._toggle_pause)
-        self._pause_btn.setToolTip("Freeze/unfreeze the live trace display")
+        self._pause_btn.setToolTip("Freeze/unfreeze the trace display")
         top_bar.addWidget(self._pause_btn)
 
         layout.addLayout(top_bar)
@@ -58,23 +67,28 @@ class DashboardWidget(QWidget):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(4)
 
         self.traces = LiveTracesWidget()
         self.traces.set_sensor_count(sensor_count)
-        left_layout.addWidget(self.traces)
+        left_layout.addWidget(self.traces, 3)
 
-        mid_split = QSplitter(Qt.Horizontal)
-        self.chemprint = ChemprintBarWidget()
-        mid_split.addWidget(self.chemprint)
+        bottom_split = QSplitter(Qt.Horizontal)
+        bottom_split.setHandleWidth(1)
 
         self.fingerprint = RadarFingerprintWidget()
-        mid_split.addWidget(self.fingerprint)
+        bottom_split.addWidget(self.fingerprint)
 
-        left_layout.addWidget(mid_split)
+        self.sensor_amplitudes = SensorAmplitudeWidget()
+        bottom_split.addWidget(self.sensor_amplitudes)
+
+        bottom_split.setSizes([250, 200])
+        left_layout.addWidget(bottom_split, 1)
 
         content.addWidget(left_panel)
 
         right_panel = QWidget()
+        right_panel.setMinimumWidth(180)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(4)
@@ -82,31 +96,29 @@ class DashboardWidget(QWidget):
         self.signal_quality = SignalQualityIndicator()
         right_layout.addWidget(self.signal_quality)
 
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet(f"color: {COLORS['border']};")
+        right_layout.addWidget(line)
+
         self.substance = SubstanceDisplay()
-        self.substance.setMinimumHeight(100)
+        self.substance.setMinimumHeight(80)
         right_layout.addWidget(self.substance)
 
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.HLine)
+        line2.setStyleSheet(f"color: {COLORS['border']};")
+        right_layout.addWidget(line2)
+
         self.competition = CompetitionGrid()
-        self.competition.setMinimumHeight(150)
-        self.competition.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.competition.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
         right_layout.addWidget(self.competition, 1)
 
-        data_info = QLabel("Per-Sensor Quality")
-        data_info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; padding-top: 8px;")
-        right_layout.addWidget(data_info)
-
-        self._sensor_quality_labels = []
-        sensor_names = ["MQ-135", "MQ-3", "MQ-6", "MQ-7", "MQ-4", "MQ-8"]
-        for i, name in enumerate(sensor_names):
-            lbl = QLabel(f"{name}: --")
-            lbl.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 9px;")
-            right_layout.addWidget(lbl)
-            self._sensor_quality_labels.append(lbl)
-
-        right_layout.addStretch()
         content.addWidget(right_panel)
 
-        content.setSizes([650, 300])
+        content.setSizes([750, 220])
         layout.addWidget(content)
 
         self._hint_label = QLabel(
@@ -142,23 +154,32 @@ class DashboardWidget(QWidget):
             result = self._classifier.add_sample(sample)
             if result is not None:
                 now = time.monotonic()
-                if now - getattr(self, '_last_prediction_time', 0) < 0.4:
+                if now - getattr(self, "_last_prediction_time", 0) < 0.4:
                     return
                 self._last_prediction_time = now
                 label, confidence = result
                 self._update_competition_grid()
                 if not self._classifier.is_unknown:
                     self.update_prediction(label, confidence)
-                    self.substance.set_flash(label != self.substance._last_substance)
+                    self.substance.set_flash(
+                        label != self.substance._last_substance
+                    )
                     self.substance._last_substance = label
                 else:
                     nearest = label if label != "unknown" else ""
-                    display = f"Unknown — nearest: {nearest}" if nearest else "Unknown"
-                    self.update_prediction(display, confidence, "Low confidence — out of distribution")
+                    display = (
+                        f"Unknown \u2014 nearest: {nearest}" if nearest else "Unknown"
+                    )
+                    self.update_prediction(
+                        display, confidence,
+                        "Low confidence \u2014 out of distribution"
+                    )
                     self.substance._last_substance = "unknown"
 
                 if self._classifier.is_locked:
-                    self.substance.set_locked(True, self._classifier.locked_class)
+                    self.substance.set_locked(
+                        True, self._classifier.locked_class
+                    )
                 else:
                     self.substance.set_locked(False)
 
@@ -171,16 +192,20 @@ class DashboardWidget(QWidget):
             top_idx = int(np.argmax(probs))
             self.competition.update_probabilities(probs, top_idx)
 
-    def update_prediction(self, substance: str, confidence: float, warning: str = "") -> None:
+    def update_prediction(
+        self, substance: str, confidence: float, warning: str = ""
+    ) -> None:
         self.substance.update_prediction(substance, confidence, warning)
 
-    def update_chemprint(self, chemprint: np.ndarray) -> None:
-        self.chemprint.update_chemprint(chemprint)
+    def update_amplitudes(self, amplitudes: np.ndarray) -> None:
+        self.sensor_amplitudes.update_amplitudes(amplitudes)
 
     def update_fingerprint(self, features: dict, label: str = "") -> None:
         self.fingerprint.set_fingerprint(features, label)
 
-    def add_fingerprint_overlay(self, features: dict, label: str = "", color: str = "") -> None:
+    def add_fingerprint_overlay(
+        self, features: dict, label: str = "", color: str = ""
+    ) -> None:
         self.fingerprint.add_fingerprint(features, label, color)
 
     def clear_fingerprint_overlay(self) -> None:
@@ -188,7 +213,7 @@ class DashboardWidget(QWidget):
 
     def update_theme(self) -> None:
         self.traces.update_theme()
-        self.chemprint.update_theme()
+        self.sensor_amplitudes.update_theme()
         self.fingerprint.update_theme()
         self.signal_quality.update_theme()
         self.substance.update_theme()
@@ -199,27 +224,26 @@ class DashboardWidget(QWidget):
         self.traces.set_sensor_count(count)
 
     def update_quality_metrics(self, metrics: list[dict]):
-        sensor_names = ["MQ-135", "MQ-3", "MQ-6", "MQ-7", "MQ-4", "MQ-8"]
+        qualities = []
         for i, m in enumerate(metrics):
-            if i >= len(self._sensor_quality_labels):
-                break
             s = m.get("stability", 0)
-            v = m.get("variance", 0)
-            color = COLORS["accent_green"] if s > 80 else COLORS["accent_yellow"] if s > 50 else COLORS["accent_red"]
-            self._sensor_quality_labels[i].setText(
-                f"{sensor_names[i]}: {s:.0f}% stable (var={v:.1f})"
-            )
-            self._sensor_quality_labels[i].setStyleSheet(f"color: {color}; font-size: 9px;")
+            if s > 80:
+                qualities.append("good")
+            elif s > 50:
+                qualities.append("warning")
+            else:
+                qualities.append("error")
+        self._last_qualities = qualities
+        self.traces.set_sensor_quality(qualities)
 
     def set_connected(self, connected: bool):
-        if connected:
-            self._hint_label.setVisible(False)
-        else:
-            self._hint_label.setVisible(True)
+        self._hint_label.setVisible(not connected)
 
     def _toggle_pause(self) -> None:
         self.traces.toggle_pause()
-        self._pause_btn.setText("Resume" if self.traces.is_paused else "Pause")
+        self._pause_btn.setText(
+            "Resume" if self.traces.is_paused else "Pause"
+        )
 
     def _update_stats(self) -> None:
         n = self.traces.sample_count
@@ -233,22 +257,19 @@ class DashboardWidget(QWidget):
                 for si in range(min(6, recent.shape[1])):
                     col = recent[:, si]
                     var = float(col.var())
-                    mean = float(col.mean())
-                    stability = max(0, min(100, 100 * (1 - min(var / 500, 1))))
-                    per_sensor.append({"variance": var, "stability": stability, "mean": mean})
+                    stability = max(
+                        0, min(100, 100 * (1 - min(var / 500, 1)))
+                    )
+                    per_sensor.append(
+                        {"variance": var, "stability": stability}
+                    )
                 self.update_quality_metrics(per_sensor)
                 self.signal_quality.update_from_metrics(per_sensor)
-                avg_var = np.mean([m["variance"] for m in per_sensor])
-                self._data_quality.setText(f"Avg variance: {avg_var:.1f}")
 
     def reset(self) -> None:
         self.traces.reset()
         self.substance.clear()
         self.signal_quality.reset_warmup()
-        self.chemprint.clear()
+        self.sensor_amplitudes.clear()
         self.competition.reset()
         self._sample_count_label.setText("Samples: 0")
-        self._data_quality.setText("")
-        for lbl in self._sensor_quality_labels:
-            lbl.setText(f"{lbl.text().split(':')[0]}: --")
-            lbl.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 9px;")

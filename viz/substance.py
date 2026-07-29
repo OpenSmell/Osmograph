@@ -133,8 +133,9 @@ class SubstanceDisplay(QWidget):
     def set_locked(self, locked: bool, class_name: str = "") -> None:
         self._locked = locked
         if locked:
-            border = "2px solid #00ff88"
-            self.setStyleSheet(f"border: {border}; border-radius: 8px;")
+            self.setStyleSheet(
+                f"border: 2px solid {COLORS['accent']}; border-radius: 8px;"
+            )
             self.setToolTip(f"Locked on: {class_name}")
         else:
             self.setStyleSheet("")
@@ -154,7 +155,9 @@ class SubstanceDisplay(QWidget):
         if self._flash_active:
             from PySide6.QtGui import QPainter, QColor, QBrush
             p = QPainter(self)
-            p.setBrush(QBrush(QColor(0, 255, 136, 40)))
+            flash_color = QColor(COLORS["accent"])
+            flash_color.setAlpha(40)
+            p.setBrush(QBrush(flash_color))
             p.setPen(Qt.NoPen)
             p.drawRoundedRect(self.rect(), 8, 8)
             p.end()

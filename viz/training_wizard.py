@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 
-from Osmograph.viz.realtime_classifier import extract_features
+from Osmograph.ui.theme import COLORS
 
 logger = logging.getLogger(__name__)
 
@@ -276,8 +276,8 @@ class TrainingWizard(QDialog):
         btn_layout = QHBoxLayout()
         self._train_btn = QPushButton("Train Classifier")
         self._train_btn.setStyleSheet(
-            "background-color: #44bb77; color: black; font-weight: bold; "
-            "padding: 6px 20px; border-radius: 4px;"
+            f"background-color: {COLORS['success']}; color: {COLORS['accent_text']}; font-weight: bold; "
+            f"padding: 6px 20px; border-radius: 4px;"
         )
         self._train_btn.clicked.connect(self._on_train)
         self._train_btn.setEnabled(False)

@@ -49,7 +49,7 @@ class ConfirmDialog(QDialog):
 
         confirm_btn = QPushButton(confirm_text)
         confirm_btn.setStyleSheet(
-            f"background-color: {COLORS['accent_red']}; color: black; font-weight: bold;"
+            f"background-color: {COLORS['accent_red']}; color: {COLORS['accent_text']}; font-weight: bold;"
         )
         confirm_btn.clicked.connect(self.accept)
         btn_layout.addWidget(confirm_btn)
@@ -122,7 +122,7 @@ class PresetSelectionDialog(QDialog):
 
         self._flash_btn = QPushButton("Flash Firmware")
         self._flash_btn.setStyleSheet(
-            f"background-color: {COLORS['accent_cyan']}; color: black; font-weight: bold;"
+            f"background-color: {COLORS['accent_cyan']}; color: {COLORS['accent_text']}; font-weight: bold;"
         )
         self._flash_btn.clicked.connect(self._on_flash)
         btn_layout.addWidget(self._flash_btn)

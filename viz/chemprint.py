@@ -1,103 +1,75 @@
 import numpy as np
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar
 from PySide6.QtCore import Qt
-
-import pyqtgraph as pg
 
 from Osmograph.ui.theme import COLORS
 
-DIM_GROUPS = [
-    ("Base properties", 0, 12, "#00ffff"),
-    ("Topological indices", 12, 15, "#ff00ff"),
-    ("Functional groups", 15, 29, "#adff2f"),
-]
-
-DIM_LABELS = [f"d{i}" for i in range(29)]
+SENSOR_NAMES = ["MQ-135", "MQ-3", "MQ-6", "MQ-7", "MQ-4", "MQ-8"]
 
 
-class ChemprintBarWidget(QWidget):
+class SensorAmplitudeWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._chemprint = np.zeros(29, dtype=np.float32)
-
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setSpacing(1)
 
-        title = QLabel("Chemoprint (29-dim)")
-        title.setStyleSheet(f"color: {COLORS['text_bright']}; font-weight: bold; font-size: 13px; padding: 4px;")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-
-        self.plot_widget = pg.PlotWidget(background=COLORS["bg_dark"])
-        self.plot_widget.setLabel("bottom", "Dimension", color=COLORS["text_dim"])
-        self.plot_widget.setLabel("left", "Activation", color=COLORS["text_dim"])
-        self.plot_widget.setMouseEnabled(False, False)
-        self.plot_widget.setMenuEnabled(False)
-        self.plot_widget.getAxis("left").setTextPen(COLORS["text_dim"])
-        self.plot_widget.getAxis("bottom").setTextPen(COLORS["text_dim"])
-        self.plot_widget.showGrid(x=False, y=True, alpha=0.1)
-        self.plot_widget.setMaximumHeight(120)
-
-        self._bar_graph = pg.BarGraphItem(
-            x=np.arange(29),
-            height=np.zeros(29),
-            width=0.7,
+        header = QLabel("Sensor Response")
+        header.setStyleSheet(
+            f"color: {COLORS['text_secondary']}; font-size: 10px; font-weight: 600; padding: 1px 4px;"
         )
-        self.plot_widget.addItem(self._bar_graph)
-        self.plot_widget.setXRange(-0.5, 28.5)
+        layout.addWidget(header)
 
-        self._legend_label = QLabel("Base | Topo | FnGroups")
-        self._legend_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 9px; padding: 2px;")
-        self._legend_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._legend_label)
-        layout.addWidget(self.plot_widget)
+        self._bars = []
+        for name in SENSOR_NAMES:
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            row.setContentsMargins(0, 0, 0, 0)
 
-    def update_chemprint(self, chemprint: np.ndarray) -> None:
-        self._chemprint = chemprint.copy() if chemprint is not None else np.zeros(29)
+            label = QLabel(name)
+            label.setFixedWidth(50)
+            label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 9px;")
+            row.addWidget(label)
 
-        brushes = []
-        for i in range(29):
-            color = "#666666"
-            for _, start, end, c in DIM_GROUPS:
-                if start <= i < end:
-                    color = c
-                    break
-            brushes.append(pg.mkColor(color))
+            bar = QProgressBar()
+            bar.setRange(0, 1000)
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(6)
+            bar.setStyleSheet(
+                f"QProgressBar {{ background-color: {COLORS['bg_tertiary']}; border: none; border-radius: 3px; }} "
+                f"QProgressBar::chunk {{ background-color: {COLORS['accent']}; border-radius: 3px; }}"
+            )
+            row.addWidget(bar)
 
-        self.plot_widget.clear()
-        self._bar_graph = pg.BarGraphItem(
-            x=np.arange(29),
-            height=self._chemprint,
-            width=0.7,
-            brushes=brushes,
-        )
-        self.plot_widget.addItem(self._bar_graph)
-        self.plot_widget.setXRange(-0.5, 28.5)
-        self.plot_widget.enableAutoRange(axis=pg.ViewBox.YAxis)
+            val_label = QLabel("0.00")
+            val_label.setFixedWidth(34)
+            val_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 8px;")
+            row.addWidget(val_label)
 
-        legend_html = " | ".join(
-            f'<span style="color:{c};">{name}</span>'
-            for name, _, _, c in DIM_GROUPS
-        )
-        self._legend_label.setText(legend_html)
+            layout.addLayout(row)
+            self._bars.append((bar, val_label))
 
-    def clear(self) -> None:
-        self._chemprint = np.zeros(29, dtype=np.float32)
-        self.plot_widget.clear()
-        self._bar_graph = pg.BarGraphItem(
-            x=np.arange(29),
-            height=np.zeros(29),
-            width=0.7,
-        )
-        self.plot_widget.addItem(self._bar_graph)
-        self.plot_widget.setXRange(-0.5, 28.5)
+        self.setMinimumHeight(100)
 
-    @property
-    def chemprint(self) -> np.ndarray:
-        return self._chemprint
+    def update_amplitudes(self, amplitudes: np.ndarray):
+        for i, (bar, label) in enumerate(self._bars):
+            if i < len(amplitudes):
+                val = float(amplitudes[i])
+                bar.setValue(min(1000, int(val * 1000)))
+                label.setText(f"{val:.2f}")
 
-    def update_theme(self) -> None:
-        self.plot_widget.setBackground(COLORS["bg_primary"])
-        self.plot_widget.getAxis("left").setTextPen(COLORS["text_secondary"])
-        self.plot_widget.getAxis("bottom").setTextPen(COLORS["text_secondary"])
-        self._legend_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 9px; padding: 2px;")
+    def clear(self):
+        for bar, label in self._bars:
+            bar.setValue(0)
+            label.setText("0.00")
+
+    def update_theme(self):
+        self._update_bar_styles()
+
+    def _update_bar_styles(self):
+        for bar, _ in self._bars:
+            bar.setStyleSheet(
+                f"QProgressBar {{ background-color: {COLORS['bg_tertiary']}; border: none; border-radius: 3px; }} "
+                f"QProgressBar::chunk {{ background-color: {COLORS['accent']}; border-radius: 3px; }}"
+            )

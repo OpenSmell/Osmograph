@@ -165,7 +165,7 @@ class CompetitionGrid(QWidget):
             painter.drawRoundedRect(x, y, BAR_WIDTH, bar_height, 4, 4)
 
             pct_text = f"{int(prob * 100)}%"
-            painter.setPen(QColor(255, 255, 255))
+            painter.setPen(QColor(COLORS["accent_text"]))
             pct_font = QFont("sans-serif", 8, QFont.Bold)
             painter.setFont(pct_font)
             pct_rect = painter.boundingRect(x, y - 14, BAR_WIDTH, 12, Qt.AlignCenter, pct_text)
@@ -176,12 +176,12 @@ class CompetitionGrid(QWidget):
             painter.translate(x + BAR_WIDTH // 2, h - 10)
             painter.rotate(-90)
             text_rect = painter.boundingRect(0, 0, 50, BAR_WIDTH, Qt.AlignCenter, class_name)
-            painter.setPen(QColor(200, 200, 200))
+            painter.setPen(QColor(COLORS["text_muted"]))
             painter.drawText(text_rect, Qt.AlignCenter, class_name)
             painter.restore()
 
         if self._locked:
-            painter.setPen(QPen(QColor(0, 255, 100, 120), 2))
+            painter.setPen(QPen(QColor(COLORS["accent"]), 2, Qt.DashLine))
             painter.drawRoundedRect(2, 2, w - 4, h - 4, 8, 8)
 
         painter.end()

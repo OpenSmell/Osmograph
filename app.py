@@ -151,7 +151,7 @@ class OsmographMainWindow(QMainWindow):
         rec_layout.addStretch()
         self._cancel_rec_btn = QPushButton("Cancel")
         self._cancel_rec_btn.setStyleSheet(
-            f"background-color: {COLORS['error']}; color: white; "
+            f"background-color: {COLORS['error']}; color: {COLORS['accent_text']}; "
             f"font-weight: 600; font-size: 10px; padding: 2px 12px; border-radius: 4px; border: none;"
         )
         self._cancel_rec_btn.clicked.connect(self._cancel_recording)
@@ -330,7 +330,7 @@ class OsmographMainWindow(QMainWindow):
 
         self._record_btn = QPushButton("Record")
         self._record_btn.setStyleSheet(
-            f"background-color: {COLORS['accent_red']}; color: white; font-weight: bold;"
+            f"background-color: {COLORS['accent_red']}; color: {COLORS['accent_text']}; font-weight: bold;"
         )
         self._record_btn.setToolTip("Start a recording session. Enter a label first!")
         self._record_btn.clicked.connect(self._start_recording_dialog)
@@ -421,7 +421,7 @@ class OsmographMainWindow(QMainWindow):
 
         self._train_btn = QPushButton("Train Adapter")
         self._train_btn.setStyleSheet(
-            f"background-color: {COLORS['accent_cyan']}; color: black; font-weight: bold;"
+            f"background-color: {COLORS['accent_cyan']}; color: {COLORS['accent_text']}; font-weight: bold;"
         )
         self._train_btn.clicked.connect(self._train_adapter)
         self._train_btn.setEnabled(False)
@@ -516,9 +516,9 @@ class OsmographMainWindow(QMainWindow):
         controls.addWidget(QLabel("Duration:"))
         controls.addWidget(self._burnin_hours_spin)
 
-        start_btn = QPushButton("Start Burn-In")
-        start_btn.clicked.connect(self._start_burnin)
-        controls.addWidget(start_btn)
+        self._burnin_start_btn = QPushButton("Start Burn-In")
+        self._burnin_start_btn.clicked.connect(self._toggle_burnin)
+        controls.addWidget(self._burnin_start_btn)
 
         reset_btn = QPushButton("Reset")
         reset_btn.clicked.connect(self._reset_burnin)
@@ -944,7 +944,7 @@ class OsmographMainWindow(QMainWindow):
             self._serial_label.setStyleSheet(f"color: {COLORS['accent_green']}; padding: 0 8px;")
             self._connect_btn.setText("Disconnect")
             self._connect_btn.setStyleSheet(
-                f"background-color: {COLORS['accent_red']}; color: white; font-weight: bold;"
+                f"background-color: {COLORS['accent_red']}; color: {COLORS['accent_text']}; font-weight: bold;"
             )
             self.dashboard.set_connected(True)
             self._settings.setValue("serial/port", self._port_combo.currentText())
@@ -1106,6 +1106,11 @@ class OsmographMainWindow(QMainWindow):
                 feat_dict = dict(zip(feat_names, features))
                 label = getattr(result, "substance", "")
                 self.dashboard.update_fingerprint(feat_dict, label)
+                amplitudes = np.array([
+                    feat_dict.get(f"ch{i}_da_relative_amplitude", 0)
+                    for i in range(6)
+                ])
+                self.dashboard.update_amplitudes(amplitudes)
 
             substance = getattr(result, "substance", "Unknown")
             confidence = getattr(result, "confidence", 0.0)
@@ -1281,11 +1286,20 @@ class OsmographMainWindow(QMainWindow):
         self._burnin_status.setText("Burn-in: COMPLETE")
         self._burnin_status.setStyleSheet(f"color: {COLORS['accent_green']}; font-size: 24px; font-weight: bold;")
 
+    def _toggle_burnin(self):
+        if self._burnin.is_running:
+            self._burnin.stop()
+            self._burnin_start_btn.setText("Start Burn-In")
+            self._status.showMessage("Burn-in paused", 3000)
+        else:
+            self._start_burnin()
+
     def _start_burnin(self):
         hours = self._burnin_hours_spin.value()
         self._burnin.set_burnin_hours(hours)
         self._burnin.reset(hours)
         self._burnin.start()
+        self._burnin_start_btn.setText("Stop Burn-In")
         self._status.showMessage(f"Burn-in started: {hours}h", 5000)
 
     def _reset_burnin(self):
@@ -1293,6 +1307,7 @@ class OsmographMainWindow(QMainWindow):
         if confirm.exec():
             hours = self._burnin_hours_spin.value()
             self._burnin.reset(hours)
+            self._burnin_start_btn.setText("Start Burn-In")
 
     def _on_burnin_hours_change(self, hours: float):
         pass
