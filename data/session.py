@@ -72,6 +72,11 @@ class SessionManager:
         self._index_file.write_text(json.dumps(data, indent=2))
 
     def add_record(self, record: SessionRecord) -> None:
+        for i, r in enumerate(self._records):
+            if r.file_id == record.file_id:
+                self._records[i] = record
+                self._save_index()
+                return
         self._records.append(record)
         self._save_index()
 
@@ -99,6 +104,10 @@ class SessionManager:
 
     def get_records_for_adapter_training(self) -> list[SessionRecord]:
         return [r for r in self._records if r.substance]
+
+    def set_data_dir(self, path: str | Path) -> None:
+        self._dir = Path(path)
+        self._index_file = self._dir / ".session_index.json"
 
     def clear(self) -> None:
         self._records.clear()

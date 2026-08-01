@@ -174,4 +174,24 @@ class SubstanceDisplay(QWidget):
 
     def update_theme(self) -> None:
         from Osmograph.ui.theme import COLORS as C
+        self._substance_label.setStyleSheet(
+            f"color: {C['text_bright']}; font-size: 22px; font-weight: bold;"
+        )
+        self._conf_value.setStyleSheet(f"color: {C['accent']}; font-size: 11px;")
         self._warning_label.setStyleSheet(f"color: {C['warning']}; font-size: 9px;")
+        self._progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {C['bg_tertiary']};
+                border: none;
+                border-radius: 4px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {C['accent']};
+                border-radius: 4px;
+            }}
+        """)
+        header_item = self.layout().itemAt(0)
+        if header_item:
+            hw = header_item.widget()
+            if hw:
+                hw.setStyleSheet(f"color: {C['text_dim']}; font-size: 10px; font-weight: bold;")

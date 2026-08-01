@@ -204,8 +204,8 @@ class RealtimeClassifier:
         # Detect and expand padded data: hardware may have fewer sensors than 6
         # even though serial reader pads to 6. Check if trailing channels are dead.
         hw_sensors = self._n_sensors
-        if hw_sensors >= 6:
-            hw_sensors = 3  # no explicit hw count; assume 3-sensor device
+        if hw_sensors == 0:
+            hw_sensors = 6  # no explicit hw count; assume 6-sensor device
         needs_expand = n_cols >= hw_sensors and hw_sensors < 6
         if needs_expand and n_cols >= hw_sensors:
             # Verify trailing channels are indeed padding (near-zero)

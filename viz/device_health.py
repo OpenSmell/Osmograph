@@ -80,4 +80,7 @@ class DeviceHealthWidget(QWidget):
             self._rows[i]["val"].setText(status)
 
     def update_theme(self) -> None:
-        pass
+        from Osmograph.ui.theme import COLORS as C
+        for i, row in enumerate(self._rows):
+            row["label"].setStyleSheet(f"color: {C['text_muted']}; font-size: 8px;")
+            row["val"].setStyleSheet(f"color: {C['text_muted']}; font-size: 8px;")

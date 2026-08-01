@@ -16,7 +16,7 @@ class InfoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(400)
-        self.setStyleSheet(DARK_STYLESHEET)
+        self.setStyleSheet(generate_stylesheet())
 
         layout = QVBoxLayout(self)
         msg = QLabel(message)
@@ -34,7 +34,7 @@ class ConfirmDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(400)
-        self.setStyleSheet(DARK_STYLESHEET)
+        self.setStyleSheet(generate_stylesheet())
 
         layout = QVBoxLayout(self)
         msg = QLabel(message)
@@ -61,7 +61,7 @@ class ProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(450)
-        self.setStyleSheet(DARK_STYLESHEET)
+        self.setStyleSheet(generate_stylesheet())
         self.setModal(True)
 
         layout = QVBoxLayout(self)
@@ -95,7 +95,7 @@ class PresetSelectionDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Select Sensor Configuration")
         self.setMinimumWidth(450)
-        self.setStyleSheet(DARK_STYLESHEET)
+        self.setStyleSheet(generate_stylesheet())
 
         self.selected_preset = presets[0] if presets else ""
 
@@ -146,7 +146,7 @@ class PinMappingDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Pin Mapper")
         self.setMinimumSize(500, 450)
-        self.setStyleSheet(DARK_STYLESHEET)
+        self.setStyleSheet(generate_stylesheet())
 
         from Osmograph.sensor.pin_mapper import PinMapper
         from Osmograph.sensor.profiles import SensorProfiles

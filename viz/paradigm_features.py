@@ -19,6 +19,12 @@ from pathlib import Path
 
 N_CHANNELS = 6
 
+def _num_trapz(y: np.ndarray) -> float:
+    try:
+        return float(np.trapezoid(y))
+    except AttributeError:
+        return float(np.trapz(y))
+
 
 def compute_window_paradigms(window: np.ndarray, r0_samples: int = 3) -> np.ndarray:
     n_ch = window.shape[1]
@@ -39,7 +45,7 @@ def compute_window_paradigms(window: np.ndarray, r0_samples: int = 3) -> np.ndar
         diffs = np.diff(ch)
         mean_slope = float(np.mean(np.abs(diffs)) / R0) if len(diffs) > 0 else 0.0
         normalized = np.abs(ch - R0) / R0
-        auc = float(np.trapezoid(normalized)) if len(normalized) > 1 else float(normalized[0])
+        auc = _num_trapz(normalized) if len(normalized) > 1 else float(normalized[0])
         n_first = min(3, len(ch))
         n_last = min(3, len(ch))
         first_mean = np.mean(ch[:n_first])

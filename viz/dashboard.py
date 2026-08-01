@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 import numpy as np
 
 from Osmograph.viz.traces import LiveTracesWidget
-from Osmograph.viz.fingerprint import RadarFingerprintWidget
+from Osmograph.viz.fingerprint import FingerprintPanel
 from Osmograph.viz.signal_quality import SignalQualityIndicator, SignalLevel
 from Osmograph.viz.substance import SubstanceDisplay
 from Osmograph.viz.competition_grid import CompetitionGrid
@@ -21,6 +21,7 @@ class DashboardWidget(QWidget):
         self._sensor_count = sensor_count
         self._classifier = None
         self._last_qualities = ["off"] * 6
+        self._last_fp_push = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -42,10 +43,10 @@ class DashboardWidget(QWidget):
         top_bar.addStretch()
 
         self._fp_btn = QPushButton("FP")
-        self._fp_btn.setFixedSize(28, 22)
+        self._fp_btn.setFixedSize(36, 24)
         self._fp_btn.setToolTip("Toggle fingerprint overlay")
         self._fp_btn.setStyleSheet(
-            f"font-size: 8px; font-weight: bold; padding: 0; "
+            f"font-size: 10px; font-weight: bold; padding: 0; "
             f"background: {COLORS['bg_tertiary']}; color: {COLORS['text_secondary']}; "
             f"border: 1px solid {COLORS['border']}; border-radius: 3px;"
         )
@@ -53,13 +54,13 @@ class DashboardWidget(QWidget):
         top_bar.addWidget(self._fp_btn)
 
         self._reset_btn = QPushButton("Reset")
-        self._reset_btn.setFixedWidth(60)
+        self._reset_btn.setFixedWidth(72)
         self._reset_btn.clicked.connect(self.reset)
         self._reset_btn.setToolTip("Clear all traces and predictions")
         top_bar.addWidget(self._reset_btn)
 
         self._pause_btn = QPushButton("Pause")
-        self._pause_btn.setFixedWidth(60)
+        self._pause_btn.setFixedWidth(72)
         self._pause_btn.clicked.connect(self._toggle_pause)
         self._pause_btn.setToolTip("Freeze/unfreeze the trace display")
         top_bar.addWidget(self._pause_btn)
@@ -80,7 +81,7 @@ class DashboardWidget(QWidget):
         self.traces.set_sensor_count(sensor_count)
         self._left_split.addWidget(self.traces)
 
-        self.fingerprint = RadarFingerprintWidget()
+        self.fingerprint = FingerprintPanel()
         self._left_split.addWidget(self.fingerprint)
         self._fp_visible = True
 
@@ -128,8 +129,10 @@ class DashboardWidget(QWidget):
 
         self._hint_label = QLabel(
             "Welcome to Osmograph\n"
-            "Connect your ESP32 via USB \u2192 Detect Board \u2192 Connect\n"
-            "Or click Demo for simulated data \u2192 Recordings tab to import CSV"
+            "USB: Connect ESP32 \u2192 Detect Board \u2192 Connect\n"
+            "WiFi: Switch to WiFi mode \u2192 Enter IP \u2192 Connect\n"
+            "Demo: Click Demo for simulated data (no hardware)\n"
+            "F1: Open documentation"
         )
         self._hint_label.setAlignment(Qt.AlignCenter)
         self._hint_label.setStyleSheet(
@@ -202,6 +205,9 @@ class DashboardWidget(QWidget):
     ) -> None:
         self.substance.update_prediction(substance, confidence, warning)
 
+    def update_chemprint(self, chemprint: np.ndarray) -> None:
+        pass  # chemprint display was removed; data still available via OpenSmell
+
     def update_fingerprint(self, features: dict, label: str = "") -> None:
         self.fingerprint.set_fingerprint(features, label)
 
@@ -226,7 +232,7 @@ class DashboardWidget(QWidget):
             f"padding: 16px; font-size: 12px; line-height: 1.6;"
         )
         self._fp_btn.setStyleSheet(
-            f"font-size: 8px; font-weight: bold; padding: 0; "
+            f"font-size: 10px; font-weight: bold; padding: 0; "
             f"background: {COLORS['bg_tertiary']}; color: {COLORS['text_secondary']}; "
             f"border: 1px solid {COLORS['border']}; border-radius: 3px;"
         )
@@ -266,9 +272,44 @@ class DashboardWidget(QWidget):
             "Resume" if self.traces.is_paused else "Pause"
         )
 
+    @staticmethod
+    def _compute_live_features(data: np.ndarray, baseline: np.ndarray) -> list[float]:
+        if len(data) < 2:
+            return [0.0] * 8
+        rel = data[-1] / np.maximum(baseline, 1e-6)
+        diffs = np.diff(data, axis=0)
+        amp = float(rel.mean())
+        rise = float(diffs.max()) if diffs.size > 0 else 0.0
+        decay = float(abs(diffs.min())) if diffs.size > 0 and diffs.min() < 0 else 0.0
+        window = data[-min(10, len(data)):]
+        auc = float(np.mean(np.sum(window, axis=0))) if window.shape[0] > 1 else 0.0
+        end = float(np.abs(data[-1] - baseline).mean())
+        sat = float(np.mean(rel > 0.8))
+        ratio_vals = []
+        for i in range(len(rel)):
+            for j in range(i + 1, len(rel)):
+                if rel[j] > 0:
+                    ratio_vals.append(abs(rel[i] / rel[j] - 1.0))
+        sel = float(np.mean(ratio_vals)) if ratio_vals else 0.0
+        ch = float(np.sum(rel > 0.1)) / 6.0
+        vec = np.array([amp, rise, decay, auc, end, sat, sel, ch], dtype=np.float64)
+        mx = float(vec.max()) if vec.max() > 0 else 1.0
+        return (vec / mx).tolist()
+
     def _update_stats(self) -> None:
         n = self.traces.sample_count
         self._sample_count_label.setText(f"Samples: {n}")
+
+        if n > 5 and n - self._last_fp_push >= 10:
+            data = self.traces.current_data
+            if len(data) > 1:
+                baseline = data[:min(5, len(data))].mean(axis=0)
+                if baseline.max() > 0:
+                    amps = (data[-1] / baseline).tolist()
+                    self.fingerprint.set_from_amplitudes(amps)
+                    feat = self._compute_live_features(data, baseline)
+                    self.fingerprint.bars.set_data(feat)
+                    self._last_fp_push = n
 
         if n > 20:
             data = self.traces.current_data

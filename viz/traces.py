@@ -32,6 +32,7 @@ class _QualityDots(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(COLORS["bg_primary"]))
         h = self.height()
         margin = 8
         n = len(self._qualities)
@@ -168,6 +169,18 @@ class LiveTracesWidget(QWidget):
         self.plot_widget.setBackground(COLORS["bg_primary"])
         self.plot_widget.getAxis("left").setTextPen(COLORS["text_secondary"])
         self.plot_widget.getAxis("bottom").setTextPen(COLORS["text_secondary"])
+        self.plot_widget.getAxis("left").setPen(pg.mkPen(COLORS["border"]))
+        self.plot_widget.getAxis("bottom").setPen(pg.mkPen(COLORS["border"]))
         self._info_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; padding: 2px 4px; font-size: 10px;"
         )
+        self._quality_dots.update()
+        for item in self.plot_widget.plotItem.items:
+            if isinstance(item, pg.LegendItem):
+                item.setBrush(pg.mkColor(COLORS["bg_secondary"]))
+                for label_item in item.items:
+                    if hasattr(label_item, 'setText') and hasattr(label_item, 'text'):
+                        try:
+                            label_item.setText(label_item.text)
+                        except Exception:
+                            pass

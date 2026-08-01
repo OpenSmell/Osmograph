@@ -1,4 +1,3 @@
-import os
 import sys
 import time
 import pickle
@@ -11,17 +10,17 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QTabWidget, QGroupBox,
-    QSpinBox, QDoubleSpinBox, QLineEdit, QMessageBox, QFileDialog,
-    QStatusBar, QMenuBar, QMenu, QSystemTrayIcon, QStyle, QFrame,
-    QProgressBar, QSizePolicy,
+    QSpinBox, QDoubleSpinBox, QLineEdit, QFileDialog,
+    QStatusBar, QMenuBar, QMenu, QFrame,
+    QProgressBar, QSizePolicy, QInputDialog,
 )
-from PySide6.QtGui import QAction, QIcon, QPixmap
+from PySide6.QtGui import QAction, QIcon
 
 from Osmograph import __version__, __app_name__
 from Osmograph.settings import get_settings, migrate_settings
 from Osmograph.board import BoardDetector, FirmwareRepository, FlashingService
 from Osmograph.sensor import SensorProfiles, PinMapper, PresetManager
-from Osmograph.data import SerialReader, WifiReader, DataValidator, CSVRecorder, SessionManager, SessionRecord
+from Osmograph.data import SerialReader, WifiReader, BleReader, DataValidator, CSVRecorder, SessionManager, SessionRecord
 from Osmograph.viz import DashboardWidget
 from Osmograph.viz.signal_quality import SignalLevel
 from Osmograph.viz.realtime_classifier import RealtimeClassifier
@@ -51,633 +50,24 @@ class OsmographMainWindow(QMainWindow):
         self._theme_manager = get_theme_manager()
         self._theme_manager.theme_changed.connect(self._on_theme_changed)
 
+        logo_path = Path(__file__).resolve().parent.parent / "opensmell_logo.png"
+        if logo_path.exists():
+            self.setWindowIcon(QIcon(str(logo_path)))
+
         self._settings = get_settings()
         migrate_settings()
 
         self._serial_reader = SerialReader(self)
         self._wifi_reader = WifiReader(self)
-        self._connection_mode = "Serial"
-        self._validator = DataValidator()
-        self._recorder = CSVRecorder(self._settings.value("data/save_dir", ""))
-        self._session_manager = SessionManager(self._settings.value("data/save_dir", ""))
-        self._burnin = BurnInTracker(self)
-        self._adapter_wizard = AdapterWizard()
-        self._plugin_loader = PluginLoader()
-        self._classifier = RealtimeClassifier()
-        self._flasher = FlashingService()
-        self._firmware_dir = Path(__file__).resolve().parent / "firmware"
-        self._active_preset = ""
-        self._connected = False
-        self._recording_start = 0.0
-        self._recording_duration = 0.0
-        self._recording_timer = QTimer(self)
-        self._recording_timer.timeout.connect(self._update_recording_countdown)
-        self._demo_timer = QTimer(self)
-        self._demo_timer.timeout.connect(self._generate_demo_sample)
-
-        FirmwareRepository.initialize(self._firmware_dir)
-        self._setup_ui()
-        self._connect_signals()
-        self._restore_geometry()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.dashboard.start_timers()
-        self._initial_discover()
-        self._refresh_ports()
-
-    def _setup_ui(self):
-        self._setup_menu_bar()
-        self._setup_status_bar()
-
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
-
-        self._toolbar = self._build_toolbar()
-        layout.addWidget(self._toolbar)
-
-        self._tabs = QTabWidget()
-        self._tabs.setDocumentMode(True)
-
-        # Tab 1: Dashboard — live sensor monitoring
-        self.dashboard = DashboardWidget()
-        self.dashboard.set_classifier(self._classifier)
-        self._tabs.addTab(self.dashboard, "Dashboard")
-        self._tabs.setTabToolTip(0, "Live sensor traces, fingerprint, predictions")
-
-        # Tab 2: Recordings — browse, train, adapter (sub-tabs)
-        self._recordings_tab = self._build_recordings_tab()
-        self._tabs.addTab(self._recordings_tab, "Recordings")
-        self._tabs.setTabToolTip(1, "Browse recordings, train classifiers, train adapters")
-
-        # Tab 3: System — settings, burn-in, plugins (sub-tabs)
-        self._system_tab = self._build_system_tab()
-        self._tabs.addTab(self._system_tab, "System")
-        self._tabs.setTabToolTip(2, "Connection settings, classifier config, burn-in, plugins")
-
-        layout.addWidget(self._tabs)
-
-        self._recording_bar = QWidget()
-        self._recording_bar.setStyleSheet(
-            f"background-color: {COLORS['bg_secondary']}; border-radius: 6px;"
-        )
-        rec_layout = QHBoxLayout(self._recording_bar)
-        rec_layout.setContentsMargins(8, 4, 8, 4)
-        self._recording_label = QLabel("")
-        self._recording_label.setStyleSheet(
-            f"color: {COLORS['error']}; font-weight: 600; font-size: 11px;"
-        )
-        rec_layout.addWidget(self._recording_label)
-        self._recording_countdown = QLabel("")
-        self._recording_countdown.setStyleSheet(
-            f"color: {COLORS['text_secondary']}; font-size: 11px;"
-        )
-        rec_layout.addWidget(self._recording_countdown)
-        rec_layout.addStretch()
-        self._cancel_rec_btn = QPushButton("Cancel")
-        self._cancel_rec_btn.setStyleSheet(
-            f"background-color: {COLORS['error']}; color: {COLORS['accent_text']}; "
-            f"font-weight: 600; font-size: 10px; padding: 2px 12px; border-radius: 4px; border: none;"
-        )
-        self._cancel_rec_btn.clicked.connect(self._cancel_recording)
-        rec_layout.addWidget(self._cancel_rec_btn)
-        self._recording_bar.setVisible(False)
-        layout.addWidget(self._recording_bar)
-
-    def _setup_menu_bar(self):
-        menubar = self.menuBar()
-
-        file_menu = menubar.addMenu("&File")
-        record_action = QAction("&Record Session...", self)
-        record_action.setShortcut("Ctrl+R")
-        record_action.triggered.connect(self._start_recording_dialog)
-        file_menu.addAction(record_action)
-
-        export_action = QAction("&Export Sessions...", self)
-        export_action.triggered.connect(self._export_sessions)
-        file_menu.addAction(export_action)
-
-        export_fp_action = QAction("Export &Fingerprint...", self)
-        export_fp_action.setShortcut("Ctrl+E")
-        export_fp_action.triggered.connect(self._export_fingerprint)
-        file_menu.addAction(export_fp_action)
-
-        file_menu.addSeparator()
-        quit_action = QAction("&Quit", self)
-        quit_action.setShortcut("Ctrl+Q")
-        quit_action.triggered.connect(self.close)
-        file_menu.addAction(quit_action)
-
-        board_menu = menubar.addMenu("&Board")
-        detect_action = QAction("&Detect / Discover", self)
-        detect_action.setShortcut("Ctrl+D")
-        detect_action.triggered.connect(self._detect_or_discover)
-        board_menu.addAction(detect_action)
-
-        flash_action = QAction("&Flash Firmware...", self)
-        flash_action.setShortcut("Ctrl+F")
-        flash_action.triggered.connect(self._flash_firmware_dialog)
-        board_menu.addAction(flash_action)
-
-        board_menu.addSeparator()
-        connect_action = QAction("&Connect", self)
-        connect_action.setShortcut("Ctrl+C")
-        connect_action.triggered.connect(self._connect_device)
-        board_menu.addAction(connect_action)
-
-        disconnect_action = QAction("&Disconnect", self)
-        disconnect_action.triggered.connect(self._disconnect_device)
-        board_menu.addAction(disconnect_action)
-
-        tools_menu = menubar.addMenu("&Tools")
-        wizard_action = QAction("&Adapter Wizard", self)
-        wizard_action.setShortcut("Ctrl+W")
-        wizard_action.triggered.connect(self._open_adapter_wizard)
-        tools_menu.addAction(wizard_action)
-
-        pin_action = QAction("&Pin Mapper...", self)
-        pin_action.triggered.connect(self._open_pin_mapper)
-        tools_menu.addAction(pin_action)
-
-        burnin_action = QAction("&Reset Burn-In Timer", self)
-        burnin_action.triggered.connect(self._reset_burnin)
-        tools_menu.addAction(burnin_action)
-
-        view_menu = menubar.addMenu("&View")
-        toggle_fullscreen = QAction("Toggle &Fullscreen", self)
-        toggle_fullscreen.setShortcut("F11")
-        toggle_fullscreen.triggered.connect(lambda: self.showFullScreen() if not self.isFullScreen() else self.showNormal())
-        view_menu.addAction(toggle_fullscreen)
-
-        view_menu.addSeparator()
-        toggle_theme = QAction("Toggle Theme", self)
-        toggle_theme.setShortcut("Ctrl+T")
-        mode_label = "Light" if self._theme_manager.is_dark() else "Dark"
-        toggle_theme.setText(f"Switch to {mode_label} Theme")
-        toggle_theme.triggered.connect(self._toggle_theme)
-        view_menu.addAction(toggle_theme)
-
-        help_menu = menubar.addMenu("&Help")
-        about_action = QAction("&About Osmograph", self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
-
-    def _setup_status_bar(self):
-        self._status = QStatusBar()
-        self._status.setStyleSheet(f"background-color: {COLORS['bg_med']}; color: {COLORS['text_dim']};")
-        self.setStatusBar(self._status)
-
-        self._board_label = QLabel("No board detected")
-        self._board_label.setStyleSheet(f"color: {COLORS['accent_orange']}; padding: 0 8px;")
-        self._status.addPermanentWidget(self._board_label)
-
-        self._serial_label = QLabel("Disconnected")
-        self._serial_label.setStyleSheet(f"color: {COLORS['text_dim']}; padding: 0 8px;")
-        self._status.addPermanentWidget(self._serial_label)
-
-    def _build_toolbar(self) -> QWidget:
-        self._toolbar = QWidget()
-        toolbar = self._toolbar
-        toolbar.setStyleSheet(f"background-color: {COLORS['bg_secondary']}; border-radius: 4px;")
-        layout = QHBoxLayout(toolbar)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(6)
-
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItems(["Serial", "WiFi"])
-        self._mode_combo.setFixedWidth(80)
-        self._mode_combo.currentTextChanged.connect(self._on_mode_change)
-        layout.addWidget(self._mode_combo)
-
-        self._detect_btn = QPushButton("Detect Board")
-        self._detect_btn.setToolTip("Scan USB ports for connected ESP32 boards")
-        self._detect_btn.clicked.connect(self._detect_or_discover)
-        layout.addWidget(self._detect_btn)
-
-        self._port_combo = QComboBox()
-        self._port_combo.setEditable(True)
-        self._port_combo.setMinimumWidth(150)
-        self._port_combo.setToolTip("Select the serial port your board is connected to")
-        layout.addWidget(self._port_combo)
-
-        self._connect_btn = QPushButton("Connect")
-        self._connect_btn.setToolTip("Open the serial connection to the selected port")
-        self._connect_btn.clicked.connect(self._toggle_connection)
-        layout.addWidget(self._connect_btn)
-
-        self._demo_btn = QPushButton("Demo")
-        self._demo_btn.setToolTip("Run in demo mode with simulated sensor data (no hardware needed)")
-        self._demo_btn.setCheckable(True)
-        self._demo_btn.clicked.connect(self._toggle_demo)
-        layout.addWidget(self._demo_btn)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setStyleSheet(f"color: {COLORS['border']};")
-        layout.addWidget(sep)
-
-        self._preset_combo = QComboBox()
-        self._preset_combo.addItems(PresetManager.get_preset_names())
-        self._preset_combo.setMinimumWidth(150)
-        self._preset_combo.currentTextChanged.connect(self._on_preset_change)
-        self._preset_combo.setToolTip("Choose your sensor configuration")
-        layout.addWidget(QLabel("Preset:"))
-        layout.addWidget(self._preset_combo)
-
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.VLine)
-        sep2.setStyleSheet(f"color: {COLORS['border']};")
-        layout.addWidget(sep2)
-
-        self._classifier_combo = QComboBox()
-        self._classifier_combo.setMinimumWidth(140)
-        self._classifier_combo.setToolTip("Select a real-time classifier (.pkl)")
-        self._classifier_combo.currentIndexChanged.connect(self._on_classifier_change)
-        layout.addWidget(QLabel("Classifier:"))
-        layout.addWidget(self._classifier_combo)
-
-        self._train_clf_btn = QPushButton("Train...")
-        self._train_clf_btn.setToolTip("Train a new classifier from your recordings")
-        self._train_clf_btn.clicked.connect(self._open_training_wizard)
-        layout.addWidget(self._train_clf_btn)
-
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.VLine)
-        sep3.setStyleSheet(f"color: {COLORS['border']};")
-        layout.addWidget(sep3)
-
-        self._label_input = QLineEdit()
-        self._label_input.setPlaceholderText("Label (e.g. garlic)...")
-        self._label_input.setMinimumWidth(130)
-        self._label_input.setToolTip("Name the substance you are recording")
-        layout.addWidget(self._label_input)
-
-        self._duration_spin = QSpinBox()
-        self._duration_spin.setRange(10, 3600)
-        self._duration_spin.setValue(60)
-        self._duration_spin.setSuffix("s")
-        self._duration_spin.setToolTip("How long to record (in seconds)")
-        layout.addWidget(QLabel("Duration:"))
-        layout.addWidget(self._duration_spin)
-
-        self._record_btn = QPushButton("Record")
-        self._record_btn.setStyleSheet(
-            f"background-color: {COLORS['accent_red']}; color: {COLORS['accent_text']}; font-weight: bold;"
-        )
-        self._record_btn.setToolTip("Start a recording session. Enter a label first!")
-        self._record_btn.clicked.connect(self._start_recording_dialog)
-        layout.addWidget(self._record_btn)
-
-        return toolbar
-
-    def _build_recordings_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        self._rec_tabs = QTabWidget()
-        self._rec_tabs.setDocumentMode(True)
-        self._rec_tabs.setStyleSheet(
-            "QTabWidget::pane { border: none; }"
-        )
-
-        self._browse_tab = self._build_browse_tab()
-        self._rec_tabs.addTab(self._browse_tab, "Browse")
-
-        self._train_tab = TrainTab(n_sensors=self._classifier.n_sensors)
-        self._train_tab.training_complete.connect(self._on_train_complete)
-        self._rec_tabs.addTab(self._train_tab, "Train")
-
-        self._adapter_tab = self._build_adapter_tab()
-        self._rec_tabs.addTab(self._adapter_tab, "Adapter")
-
-        layout.addWidget(self._rec_tabs)
-        return w
-
-    def _build_browse_tab(self) -> QWidget:
-        from PySide6.QtWidgets import QListWidget, QListWidgetItem
-
-        w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(8, 8, 8, 8)
-
-        toolbar = QHBoxLayout()
-
-        import_btn = QPushButton("Import CSV")
-        import_btn.setToolTip("Import a CSV recording from file")
-        import_btn.clicked.connect(self._import_csv_session)
-        toolbar.addWidget(import_btn)
-
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setToolTip("Reload the session list from disk")
-        refresh_btn.clicked.connect(self._refresh_session_list)
-        toolbar.addWidget(refresh_btn)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setStyleSheet(f"color: {COLORS['border']};")
-        toolbar.addWidget(sep)
-
-        self._substance_filter = QComboBox()
-        self._substance_filter.addItem("All substances")
-        self._substance_filter.setToolTip("Filter recordings by substance")
-        toolbar.addWidget(QLabel("Filter:"))
-        toolbar.addWidget(self._substance_filter)
-
-        process_btn = QPushButton("Process")
-        process_btn.setToolTip("Run OpenSmell analysis on the selected recording")
-        process_btn.clicked.connect(self._process_selected_session)
-        toolbar.addWidget(process_btn)
-
-        export_fp_btn = QPushButton("Export FP")
-        export_fp_btn.setToolTip("Export fingerprint as JSON or CSV")
-        export_fp_btn.clicked.connect(self._export_fingerprint)
-        toolbar.addWidget(export_fp_btn)
-
-        delete_btn = QPushButton("Delete")
-        delete_btn.setToolTip("Delete the selected recording permanently")
-        delete_btn.clicked.connect(self._delete_selected_session)
-        toolbar.addWidget(delete_btn)
-
-        toolbar.addStretch()
-        layout.addLayout(toolbar)
-
-        self._session_list = QListWidget()
-        self._session_list.setAlternatingRowColors(True)
-        layout.addWidget(self._session_list)
-
-        return w
-
-    def _build_system_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        self._sys_tabs = QTabWidget()
-        self._sys_tabs.setDocumentMode(True)
-        self._sys_tabs.setStyleSheet(
-            "QTabWidget::pane { border: none; }"
-        )
-
-        self._settings_tab = self._build_settings_tab()
-        self._sys_tabs.addTab(self._settings_tab, "Settings")
-
-        self._burnin_tab = self._build_burnin_tab()
-        self._sys_tabs.addTab(self._burnin_tab, "Burn-In")
-
-        self._plugin_tab = self._build_plugin_tab()
-        self._sys_tabs.addTab(self._plugin_tab, "Plugins")
-
-        layout.addWidget(self._sys_tabs)
-        return w
-
-    def _build_adapter_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-
-        header = QLabel("Adapter Training Wizard")
-        header.setStyleSheet(f"color: {COLORS['accent']}; font-size: 18px; font-weight: 700;")
-        layout.addWidget(header)
-
-        desc = QLabel(
-            "Record 3-5 different substances to train a lightweight adapter. "
-            "Osmograph will learn to distinguish your specific samples."
-        )
-        desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {COLORS['text_secondary']}; padding: 4px;")
-        layout.addWidget(desc)
-
-        from PySide6.QtWidgets import QListWidget, QListWidgetItem
-
-        self._adapter_records = QListWidget()
-        layout.addWidget(self._adapter_records)
-
-        info_layout = QHBoxLayout()
-        self._adapter_status = QLabel("Recordings: 0/3 minimum | Substances: 0/2 minimum")
-        self._adapter_status.setStyleSheet(f"color: {COLORS['text_dim']};")
-        info_layout.addWidget(self._adapter_status)
-
-        self._adapter_similarity = QLabel("")
-        self._adapter_similarity.setStyleSheet(f"color: {COLORS['accent_green']}; font-weight: bold;")
-        info_layout.addWidget(self._adapter_similarity)
-        info_layout.addStretch()
-        layout.addLayout(info_layout)
-
-        btn_layout = QHBoxLayout()
-        load_btn = QPushButton("Load from Sessions")
-        load_btn.setToolTip("Import existing recordings into the adapter training set")
-        load_btn.clicked.connect(self._load_adapter_from_sessions)
-        btn_layout.addWidget(load_btn)
-
-        clear_btn = QPushButton("Clear")
-        clear_btn.setToolTip("Remove all recordings from the adapter training set")
-        clear_btn.clicked.connect(self._clear_adapter_records)
-        btn_layout.addWidget(clear_btn)
-
-        btn_layout.addStretch()
-
-        self._train_btn = QPushButton("Train Adapter")
-        self._train_btn.setStyleSheet(
-            f"background-color: {COLORS['accent_cyan']}; color: {COLORS['accent_text']}; font-weight: bold;"
-        )
-        self._train_btn.clicked.connect(self._train_adapter)
-        self._train_btn.setEnabled(False)
-        btn_layout.addWidget(self._train_btn)
-
-        layout.addLayout(btn_layout)
-        layout.addStretch()
-
-        return w
-
-    def _build_plugin_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-
-        header = QLabel("Plugin Manager")
-        header.setStyleSheet(f"color: {COLORS['accent_cyan']}; font-size: 18px; font-weight: bold;")
-        layout.addWidget(header)
-
-        desc = QLabel(
-            "Drop `.head` model files or `.py` plugin scripts into the plugins folder. "
-            "Discovered plugins appear below."
-        )
-        desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {COLORS['text_dim']};")
-        layout.addWidget(desc)
-
-        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
-
-        self._plugin_table = QTableWidget(0, 4)
-        self._plugin_table.setHorizontalHeaderLabels(["Name", "Version", "Description", "Status"])
-        self._plugin_table.horizontalHeader().setStretchLastSection(True)
-        self._plugin_table.setAlternatingRowColors(True)
-        layout.addWidget(self._plugin_table)
-
-        btn_layout = QHBoxLayout()
-        discover_btn = QPushButton("Discover Plugins")
-        discover_btn.clicked.connect(self._discover_plugins)
-        btn_layout.addWidget(discover_btn)
-
-        reload_btn = QPushButton("Reload All")
-        reload_btn.clicked.connect(self._reload_plugins)
-        btn_layout.addWidget(reload_btn)
-
-        btn_layout.addStretch()
-
-        open_folder_btn = QPushButton("Open Plugins Folder")
-        open_folder_btn.clicked.connect(self._open_plugins_folder)
-        btn_layout.addWidget(open_folder_btn)
-
-        layout.addLayout(btn_layout)
-
-        return w
-
-    def _build_burnin_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-
-        header = QLabel("Burn-In Timer")
-        header.setStyleSheet(f"color: {COLORS['accent_orange']}; font-size: 18px; font-weight: bold;")
-        layout.addWidget(header)
-
-        desc = QLabel(
-            "New MQ sensors need a 24-hour burn-in to stabilise. "
-            "The timer runs in the background and persists across app restarts."
-        )
-        desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {COLORS['text_dim']}; padding: 4px;")
-        layout.addWidget(desc)
-
-        status_layout = QHBoxLayout()
-        self._burnin_status = QLabel("Burn-in: --:--:-- remaining")
-        self._burnin_status.setStyleSheet(f"color: {COLORS['accent_cyan']}; font-size: 24px; font-weight: bold;")
-        status_layout.addWidget(self._burnin_status)
-        status_layout.addStretch()
-        layout.addLayout(status_layout)
-
-        progress_layout = QHBoxLayout()
-        self._burnin_progress = QProgressBar()
-        self._burnin_progress.setRange(0, 100)
-        self._burnin_progress.setValue(0)
-        self._burnin_progress.setTextVisible(True)
-        self._burnin_progress.setFixedHeight(24)
-        progress_layout.addWidget(self._burnin_progress)
-        layout.addLayout(progress_layout)
-
-        controls = QHBoxLayout()
-        self._burnin_hours_spin = QDoubleSpinBox()
-        self._burnin_hours_spin.setRange(1, 168)
-        self._burnin_hours_spin.setValue(24)
-        self._burnin_hours_spin.setSuffix(" h")
-        self._burnin_hours_spin.valueChanged.connect(self._on_burnin_hours_change)
-        controls.addWidget(QLabel("Duration:"))
-        controls.addWidget(self._burnin_hours_spin)
-
-        self._burnin_start_btn = QPushButton("Start Burn-In")
-        self._burnin_start_btn.clicked.connect(self._toggle_burnin)
-        controls.addWidget(self._burnin_start_btn)
-
-        reset_btn = QPushButton("Reset")
-        reset_btn.clicked.connect(self._reset_burnin)
-        controls.addWidget(reset_btn)
-
-        controls.addStretch()
-        layout.addLayout(controls)
-
-        layout.addStretch()
-        return w
-
-    def _build_settings_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-
-        serial_group = QGroupBox("Serial Connection")
-        sg_layout = QVBoxLayout(serial_group)
-
-        baud_layout = QHBoxLayout()
-        baud_layout.addWidget(QLabel("Baud rate:"))
-        self._baud_spin = QComboBox()
-        self._baud_spin.addItems(["9600", "19200", "38400", "57600", "115200", "230400", "921600"])
-        self._baud_spin.setCurrentText("115200")
-        baud_layout.addWidget(self._baud_spin)
-        refresh_btn = QPushButton("Refresh Ports")
-        refresh_btn.clicked.connect(self._refresh_ports)
-        baud_layout.addWidget(refresh_btn)
-        baud_layout.addStretch()
-        sg_layout.addLayout(baud_layout)
-
-        help_label = QLabel("Select port from the toolbar and click Connect.")
-        help_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; padding: 4px;")
-        sg_layout.addWidget(help_label)
-
-        layout.addWidget(serial_group)
-
-        clf_group = QGroupBox("Classifier")
-        cg_layout = QVBoxLayout(clf_group)
-
-        ws_layout = QHBoxLayout()
-        ws_layout.addWidget(QLabel("Window size (samples):"))
-        self._window_size_spin = QSpinBox()
-        self._window_size_spin.setRange(20, 500)
-        self._window_size_spin.setValue(self._classifier.window_size)
-        self._window_size_spin.valueChanged.connect(self._on_window_size_change)
-        ws_layout.addWidget(self._window_size_spin)
-        ws_label = QLabel("Lower = faster, higher = more stable")
-        ws_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ws_layout.addWidget(ws_label)
-        ws_layout.addStretch()
-        cg_layout.addLayout(ws_layout)
-
-        conf_layout = QHBoxLayout()
-        conf_layout.addWidget(QLabel("Confidence threshold:"))
-        self._conf_threshold_spin = QDoubleSpinBox()
-        self._conf_threshold_spin.setRange(0.0, 1.0)
-        self._conf_threshold_spin.setSingleStep(0.05)
-        self._conf_threshold_spin.setValue(self._classifier.confidence_threshold)
-        self._conf_threshold_spin.valueChanged.connect(self._on_conf_threshold_change)
-        conf_layout.addWidget(self._conf_threshold_spin)
-        conf_label = QLabel("Below this → 'unknown'")
-        conf_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        conf_layout.addWidget(conf_label)
-        conf_layout.addStretch()
-        cg_layout.addLayout(conf_layout)
-
-        clf_info = QLabel(f"Active: {self._classifier.classifier_name}")
-        clf_info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; padding: 2px;")
-        self._clf_info_label = clf_info
-        cg_layout.addWidget(clf_info)
-
-        layout.addWidget(clf_group)
-
-        data_group = QGroupBox("Data Storage")
-        dg_layout = QVBoxLayout(data_group)
-
-        save_layout = QHBoxLayout()
-        save_layout.addWidget(QLabel("Save directory:"))
-        self._save_dir_input = QLineEdit(self._settings.value("data/save_dir", ""))
-        save_layout.addWidget(self._save_dir_input)
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self._browse_save_dir)
-        save_layout.addWidget(browse_btn)
-        dg_layout.addLayout(save_layout)
-
-        layout.addWidget(data_group)
-        layout.addStretch()
-
-        return w
-
-    def _connect_signals(self):
-        self._serial_reader.data_received.connect(self._on_data_received)
-        self._serial_reader.connection_changed.connect(self._on_connection_changed)
-        self._serial_reader.error_occurred.connect(self._on_error)
-        self._serial_reader.bootloader_detected.connect(self._on_bootloader)
-
         self._wifi_reader.data_received.connect(self._on_data_received)
         self._wifi_reader.connection_changed.connect(self._on_connection_changed)
         self._wifi_reader.error_occurred.connect(self._on_error)
+
+        self._ble_reader = BleReader(self)
+        self._ble_reader.data_received.connect(self._on_data_received)
+        self._ble_reader.connection_changed.connect(self._on_connection_changed)
+        self._ble_reader.error_occurred.connect(self._on_error)
+        self._ble_reader.devices_discovered.connect(self._on_ble_devices_discovered)
 
         self._burnin.tick.connect(self._on_burnin_tick)
         self._burnin.completed.connect(self._on_burnin_complete)
@@ -917,6 +307,13 @@ class OsmographMainWindow(QMainWindow):
             self._port_combo.setPlaceholderText("IP address...")
             self._port_combo.clear()
             self._port_combo.setEditable(True)
+        elif mode == "Bluetooth":
+            self._detect_btn.setText("Scan BLE")
+            self._detect_btn.setToolTip("Scan for nearby Osmograph-BLE devices")
+            self._port_combo.setToolTip("Enter the BLE device MAC address")
+            self._port_combo.setPlaceholderText("MAC address...")
+            self._port_combo.clear()
+            self._port_combo.setEditable(True)
         else:
             self._detect_btn.setText("Detect Board")
             self._detect_btn.setToolTip("Scan USB ports for connected ESP32 boards")
@@ -927,6 +324,8 @@ class OsmographMainWindow(QMainWindow):
     def _detect_or_discover(self):
         if self._connection_mode == "WiFi":
             self._discover_wifi()
+        elif self._connection_mode == "Bluetooth":
+            self._scan_ble()
         else:
             self._detect_board()
 
@@ -962,6 +361,8 @@ class OsmographMainWindow(QMainWindow):
             return
         if self._connection_mode == "WiFi":
             self._connect_wifi_to(addr)
+        elif self._connection_mode == "Bluetooth":
+            self._connect_ble_to(addr)
         else:
             self._connect_serial_to_port(addr)
 
@@ -992,11 +393,34 @@ class OsmographMainWindow(QMainWindow):
         else:
             InfoDialog("Connection Failed", msg).exec()
 
+    def _scan_ble(self):
+        try:
+            import bleak
+        except ImportError:
+            InfoDialog("bleak Not Installed",
+                "Install bleak for BLE support:\n\n"
+                "  pip install bleak\n\n"
+                "Alternatively, enter the MAC address manually.").exec()
+            return
+        self._status.showMessage("Scanning for BLE devices...", 5000)
+        self._ble_reader.start_scan(timeout=5)
+
+    def _connect_ble_to(self, address: str):
+        if "(" in address and ")" in address:
+            address = address.split("(")[-1].rstrip(")")
+        self._ble_reader.stop_streaming()
+        self._ble_reader.wait(2000)
+        self._ble_reader.configure(address)
+        self._ble_reader._running = True
+        self._ble_reader.start()
+        self._status.showMessage(f"Connecting to BLE: {address}", 3000)
+
     def _disconnect_device(self):
         self._serial_reader.stop_streaming()
         self._serial_reader.disconnect()
         self._wifi_reader.stop_streaming()
         self._wifi_reader.disconnect()
+        self._ble_reader.stop_streaming()
 
     def _toggle_demo(self, checked: bool) -> None:
         if checked:
@@ -1019,10 +443,12 @@ class OsmographMainWindow(QMainWindow):
 
     def _generate_demo_sample(self) -> None:
         t = time.time()
-        noise = np.random.normal(0, 0.02, 6).astype(np.float32)
+        preset = PresetManager.get(self._active_preset)
+        n = preset.sensor_count if preset else 6
+        noise = np.random.normal(0, 0.02, n).astype(np.float32)
         signals = np.array([
             0.5 + 0.3 * np.sin(t * 0.3 + i * 1.2) + 0.1 * np.sin(t * 0.7 + i * 0.8)
-            for i in range(6)
+            for i in range(n)
         ], dtype=np.float32)
         sample = signals + noise
         self._on_data_received(sample)
@@ -1053,6 +479,21 @@ class OsmographMainWindow(QMainWindow):
 
     def _on_error(self, msg: str):
         self._status.showMessage(f"Connection error: {msg}", 5000)
+
+    def _on_ble_devices_discovered(self, devices: list):
+        if not devices:
+            self._board_label.setText("No BLE devices found")
+            self._board_label.setStyleSheet(f"color: {COLORS['accent_red']}; padding: 0 8px;")
+            return
+        self._port_combo.clear()
+        for d in devices:
+            label = f"{d['name']} ({d['address']})"
+            self._port_combo.addItem(label)
+            self._port_combo.setItemData(self._port_combo.count() - 1, d['address'], Qt.UserRole)
+        self._port_combo.setCurrentIndex(0)
+        self._board_label.setText(f"Found {len(devices)} BLE device(s)")
+        self._board_label.setStyleSheet(f"color: {COLORS['accent_green']}; padding: 0 8px;")
+        self._status.showMessage(f"Found {len(devices)} Osmograph-BLE device(s)", 5000)
 
     def _on_bootloader(self):
         pass
@@ -1185,26 +626,40 @@ class OsmographMainWindow(QMainWindow):
         if not path:
             return
         try:
+            substance, ok = QInputDialog.getText(
+                self, "Import CSV", "Substance name:",
+                QLineEdit.Normal, ""
+            )
+            if not ok or not substance.strip():
+                substance = "unknown"
+
             import csv
             from datetime import datetime
 
             with open(path) as f:
                 reader = csv.reader(f)
                 header = next(reader, [])
-                row_count = sum(1 for _ in reader)
+                rows = list(reader)
+                row_count = len(rows)
+
+            timestamps = None
+            if "timestamp" in [c.lower() for c in header]:
+                ts_col = next(i for i, c in enumerate(header) if c.lower() == "timestamp")
+                timestamps = [float(r[ts_col]) for r in rows if len(r) > ts_col and r[ts_col].strip()]
+            duration = (timestamps[-1] - timestamps[0]) if timestamps and len(timestamps) > 1 else row_count / 2.0
 
             rec = SessionRecord(
-                substance="imported",
+                substance=substance.strip(),
                 csv_path=path,
                 timestamp=time.time(),
-                duration_sec=row_count / 2.0,
+                duration_sec=duration,
                 sensor_count=6,
                 preset_name=self._active_preset or "Default",
-                label="imported",
+                label=substance.strip(),
             )
             self._session_manager.add_record(rec)
             self._refresh_session_list()
-            self._status.showMessage(f"Imported: {Path(path).name}", 5000)
+            self._status.showMessage(f"Imported: {Path(path).name} ({substance.strip()})", 5000)
         except Exception as e:
             InfoDialog("Import Failed", str(e)).exec()
 
@@ -1239,11 +694,11 @@ class OsmographMainWindow(QMainWindow):
             feat_names = getattr(result, "feature_names", None)
             if features is not None and feat_names is not None:
                 feat_dict = dict(zip(feat_names, features))
-                label = getattr(result, "substance", "")
+                label = (result.substance or "") if hasattr(result, "substance") else ""
                 self.dashboard.update_fingerprint(feat_dict, label)
 
-            substance = getattr(result, "substance", "Unknown")
-            confidence = getattr(result, "confidence", 0.0)
+            substance = (result.substance or "Unknown") if hasattr(result, "substance") else "Unknown"
+            confidence = (result.confidence or 0.0) if hasattr(result, "confidence") else 0.0
             warning = getattr(result, "warning", "")
 
             self.dashboard.update_prediction(substance, confidence, warning or "")
@@ -1456,6 +911,8 @@ class OsmographMainWindow(QMainWindow):
             self._save_dir_input.setText(path)
             self._settings.setValue("data/save_dir", path)
             self._recorder = CSVRecorder(path)
+            self._session_manager.set_data_dir(path)
+            self._session_manager._load_index()
 
     def _open_pin_mapper(self):
         preset = PresetManager.get(self._active_preset)
@@ -1525,6 +982,20 @@ class OsmographMainWindow(QMainWindow):
         self._recording_bar.setStyleSheet(f"background-color: {COLORS['bg_secondary']}; border-radius: 6px;")
         self.dashboard.update_theme()
 
+    def _open_docs(self) -> None:
+        docs_path = Path(__file__).resolve().parent.parent.parent / "docs" / "index.html"
+        if docs_path.exists():
+            import subprocess
+            try:
+                subprocess.run(["xdg-open", str(docs_path)], check=False)
+            except FileNotFoundError:
+                try:
+                    subprocess.run(["open", str(docs_path)], check=False)
+                except FileNotFoundError:
+                    subprocess.run(["explorer", str(docs_path)], check=False)
+        else:
+            InfoDialog("Docs Not Found", f"Documentation not found at:\n{docs_path}").exec()
+
     def _show_about(self):
         from Osmograph.ui.theme import COLORS as C
         logo_path = Path(__file__).resolve().parent.parent / "opensmell_logo.png"
@@ -1538,6 +1009,8 @@ class OsmographMainWindow(QMainWindow):
         self._serial_reader.cleanup()
         self._wifi_reader.stop_streaming()
         self._wifi_reader.cleanup()
+        self._ble_reader.stop_streaming()
+        self._ble_reader.cleanup()
         self._recorder.cancel()
         self._burnin.stop()
 
